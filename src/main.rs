@@ -1,29 +1,38 @@
 use ::std::error::Error;
+use ::std::ffi::c_void;
 use defer::defer;
+use windows::Devices::Custom::DeviceSharingMode;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::PROPERTYKEY;
+use windows::Win32::Media::Audio::{ERole, WAVEFORMATEX};
 use windows::Win32::Media::Audio::{
     IMMDeviceEnumerator, MMDeviceEnumerator, eCommunications, eConsole, eMultimedia,
 };
+use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     STGM_READ,
 };
+use windows::core::HRESULT;
 use windows::core::{GUID, Interface, PCWSTR};
 
-use std::ffi::c_void;
-use windows::Devices::Custom::DeviceSharingMode;
-use windows::Win32::Media::Audio::{ERole, WAVEFORMATEX};
-use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows::core::HRESULT;
+// See https://github.com/Belphemur/AudioEndPointLibrary/blob/master/DefSound/PolicyConfig.h
 
 // CLSID for the PolicyConfig class
 const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
 
+// VTable for the undocumented PolicyConfig interface.
 #[repr(C)]
 #[doc(hidden)]
 pub struct IPolicyConfig_Vtbl {
     pub base__: ::windows::core::IUnknown_Vtbl,
+
+    // TODO: Confused.
+    // The known interface does not include these methods, but they fix the offset for SetDefaultEndpoint.
+    pub MysteryMethod1: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
+    pub MysteryMethod2: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
+    pub MysteryMethod3: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
+
     pub GetMixFormat:
         unsafe extern "system" fn(this: *mut c_void, PCWSTR, *mut *mut WAVEFORMATEX) -> HRESULT,
     pub GetDeviceFormat: unsafe extern "system" fn(
@@ -61,11 +70,6 @@ pub struct IPolicyConfig_Vtbl {
         *const PROPERTYKEY,
         *mut PROPVARIANT,
     ) -> HRESULT,
-
-    // The known interface does not include these methods, but they fix the offset for SetDefaultEndpoint.
-    pub MysteryMethod1: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
-    pub MysteryMethod2: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
-    pub MysteryMethod3: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
 
     pub SetDefaultEndpoint: unsafe extern "system" fn(this: *mut c_void, PCWSTR, ERole) -> HRESULT,
     pub SetEndpointVisibility: unsafe extern "system" fn(this: *mut c_void, PCWSTR, i32) -> HRESULT,
@@ -111,7 +115,6 @@ pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn 
             std::mem::transmute(*(unknown.as_raw() as *const *const usize));
 
         let first_real_method = &(*vtable).GetMixFormat;
-
         let set_default_endpoint_fn = &(*vtable).SetDefaultEndpoint;
         let actual = vtable.add(16);
         println!(
@@ -121,7 +124,6 @@ pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn 
 
         println!("Debug: Calling SetDefaultEndpoint...");
         let hr = set_default_endpoint_fn(unknown.as_raw(), pcwstr_device_id, role);
-        // let hr = set_default_endpoint_fn(unknown.as_raw(), pcwstr_device_id, role);
 
         println!("Debug: SetDefaultEndpoint returned HRESULT: 0x{:08X}", hr.0);
 
