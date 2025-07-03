@@ -60,7 +60,8 @@ pub fn set_default_endpoint(device_id: &str, role: u32) -> Result<(), Box<dyn Er
         );
 
         // Call SetDefaultEndpoint directly using the vtable
-        // The SetDefaultEndpoint method is at offset 10 in the vtable (after IUnknown methods and 7 other methods)
+        // It seems like the offset should really be either 10 or 13 (10 + IUnknown methods).
+        // However, 16 actually works, at least on Windows 11.
         let vtable = *(unknown.as_raw() as *const *const usize);
         let set_default_endpoint_fn: extern "system" fn(
             *const std::ffi::c_void,
