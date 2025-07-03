@@ -8,6 +8,9 @@ use windows::core::{GUID, Interface, PCWSTR};
 
 // CLSID for the PolicyConfig class
 const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+// const CLSID_POLICY_CONFIG_VISTA: GUID = GUID::from_u128(0x294935CE_F637_4E7C_A41B_AB255460B862);
+
+const IUNKNOWN_VTABLE_SIZE: usize = 3; // IUnknown has 3 methods: QueryInterface, AddRef, Release
 
 // Audio endpoint roles
 pub const E_ROLE_CONSOLE: u32 = 0;
@@ -63,7 +66,7 @@ pub fn set_default_endpoint(device_id: &str, role: u32) -> Result<(), Box<dyn Er
             *const std::ffi::c_void,
             PCWSTR,
             u32,
-        ) -> windows::core::HRESULT = std::mem::transmute(*(vtable.add(10)));
+        ) -> windows::core::HRESULT = std::mem::transmute(*(vtable.add(16)));
 
         println!("Debug: Calling SetDefaultEndpoint...");
         let hr = set_default_endpoint_fn(unknown.as_raw(), pcwstr_device_id, role);
