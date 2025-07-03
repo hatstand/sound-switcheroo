@@ -1,0 +1,29 @@
+[package]
+name = "audioswitch"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+defer = "0.2.1"
+env_logger = "0.11.8"
+log = "0.4.27"
+windows-core = "0.61.0"
+
+[build-dependencies]
+embed-resource = "3.0.2"
+
+[dependencies.windows]
+version = "0.61.1"
+features = [
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+]
