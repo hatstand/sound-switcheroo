@@ -32,7 +32,6 @@ pub struct IPolicyConfig_Vtbl {
     pub MysteryMethod1: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
     pub MysteryMethod2: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
     pub MysteryMethod3: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
-
     pub GetMixFormat:
         unsafe extern "system" fn(this: *mut c_void, PCWSTR, *mut *mut WAVEFORMATEX) -> HRESULT,
     pub GetDeviceFormat: unsafe extern "system" fn(
@@ -114,12 +113,10 @@ pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn 
         let vtable: *const IPolicyConfig_Vtbl =
             std::mem::transmute(*(unknown.as_raw() as *const *const usize));
 
-        let first_real_method = &(*vtable).GetMixFormat;
         let set_default_endpoint_fn = &(*vtable).SetDefaultEndpoint;
-        let actual = vtable.add(16);
         println!(
-            "Debug: VTable address: {:p}, FnAddr: {:p} ActualAddr: {:p} GetMixFormat: {:p}",
-            vtable, set_default_endpoint_fn, actual, first_real_method,
+            "Debug: VTable address: {:p}, FnAddr: {:p}",
+            vtable, set_default_endpoint_fn,
         );
 
         println!("Debug: Calling SetDefaultEndpoint...");
