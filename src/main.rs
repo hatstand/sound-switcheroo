@@ -1,16 +1,9 @@
 use ::std::error::Error;
-use ::windows_core::GUID;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::{IMMDeviceEnumerator, MMDeviceEnumerator};
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-    STGM_READ,
+    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, STGM_READ,
 };
-use windows_core::{IUnknown, Interface, implement};
-
-const CPOLICY_CONFIG_CLIENT_GUID: GUID = GUID::from_u128(179502765086287242678282948019479129033);
-
-pub struct IPolicyConfig {}
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("Hello, world!");
