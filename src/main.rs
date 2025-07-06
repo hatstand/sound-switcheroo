@@ -20,10 +20,10 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA,
     GetCursorPos, GetMessageW, GetWindowLongPtrW, HMENU, InsertMenuItemW, LoadIconW, MENUITEMINFOW,
-    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STRING, MSG, PostQuitMessage, RegisterClassExW,
-    SetForegroundWindow, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON,
-    TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_DESTROY, WM_QUIT,
-    WM_RBUTTONUP, WNDCLASSEXW,
+    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STRING, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassExW, SetForegroundWindow, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
+    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows::core::PCWSTR;
 use windows_core::{BOOL, GUID, PWSTR};
@@ -113,6 +113,28 @@ impl AudioSwitch {
                 None,
             )
             .ok()?;
+        }
+        Ok(())
+    }
+
+    fn menu_selection(&mut self, id: u32) -> Result<(), Box<dyn Error>> {
+        debug!("Menu item selected: {}", id);
+        unsafe {
+            match id {
+                POPUP_EXIT_ID => {
+                    debug!("Exit selected");
+                    PostMessageW(
+                        Some(self.window),
+                        WM_CLOSE,
+                        WPARAM::default(),
+                        LPARAM::default(),
+                    )?;
+                }
+                _ => {
+                    debug!("Unknown menu item selected: {}", id);
+                    return Ok(());
+                }
+            }
         }
         Ok(())
     }
@@ -351,6 +373,12 @@ unsafe extern "system" fn window_callback(
                 }
                 _ => DefWindowProcW(hwnd, msg, wparam, lparam),
             },
+            WM_COMMAND => {
+                debug!("Menu Command received");
+                let chosen = LOWORD(wparam.0 as isize) as u32;
+                let _ = raw_me.as_mut().unwrap().menu_selection(chosen);
+                LRESULT(0)
+            }
             WM_DESTROY => {
                 PostQuitMessage(0);
                 LRESULT(0)
