@@ -28,11 +28,6 @@ const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63d
 pub struct IPolicyConfig_Vtbl {
     pub base__: ::windows::core::IUnknown_Vtbl,
 
-    // TODO: Confused.
-    // The known interface does not include these methods, but they fix the offset for SetDefaultEndpoint.
-    // pub MysteryMethod1: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
-    // pub MysteryMethod2: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
-    // pub MysteryMethod3: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
     pub GetMixFormat:
         unsafe extern "system" fn(this: *mut c_void, PCWSTR, *mut *mut WAVEFORMATEX) -> HRESULT,
     pub GetDeviceFormat: unsafe extern "system" fn(
@@ -163,14 +158,16 @@ impl IPolicyConfig {
     where
         P0: windows_core::Param<PCWSTR>,
     {
-        (Interface::vtable(self).GetProcessingPeriod)(
-            Interface::as_raw(self),
-            device_name.param().abi(),
-            default.into().0,
-            default_period,
-            min_period,
-        )
-        .ok()
+        unsafe {
+            (Interface::vtable(self).GetProcessingPeriod)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                default.into().0,
+                default_period,
+                min_period,
+            )
+            .ok()
+        }
     }
 
     pub unsafe fn SetProcessingPeriod<P0>(
@@ -181,12 +178,14 @@ impl IPolicyConfig {
     where
         P0: windows_core::Param<PCWSTR>,
     {
-        (Interface::vtable(self).SetProcessingPeriod)(
-            Interface::as_raw(self),
-            device_name.param().abi(),
-            period,
-        )
-        .ok()
+        unsafe {
+            (Interface::vtable(self).SetProcessingPeriod)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                period,
+            )
+            .ok()
+        }
     }
 
     pub unsafe fn GetShareMode<P0>(
@@ -304,11 +303,6 @@ impl IPolicyConfig {
             .ok()
         }
     }
-}
-
-fn to_pcwstr(s: &str) -> PCWSTR {
-    let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
-    PCWSTR::from_raw(wide.as_ptr())
 }
 
 /// Sets the default audio endpoint for the specified role using raw COM interface calls
