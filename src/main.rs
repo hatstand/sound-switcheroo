@@ -1,14 +1,14 @@
-use ::std::error::Error;
 use defer::defer;
+use std::error::Error;
+use windows::core::PCWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::{
-    ERole, IMMDeviceEnumerator, MMDeviceEnumerator, eCommunications, eConsole, eMultimedia,
+    eCommunications, eConsole, eMultimedia, ERole, IMMDeviceEnumerator, MMDeviceEnumerator,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
     STGM_READ,
 };
-use windows::core::PCWSTR;
 
 mod policy_config;
 use policy_config::IPolicyConfig;
