@@ -4,7 +4,7 @@ use defer::defer;
 use log::{debug, error, info};
 use std::error::Error;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Foundation::{GetLastError, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{
     ERole, IMMDeviceEnumerator, MMDeviceEnumerator, eCommunications, eConsole, eMultimedia,
 };
@@ -18,12 +18,15 @@ use windows::Win32::UI::Shell::{
     NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
-    GetWindowLongPtrW, LoadIconW, MSG, PostQuitMessage, RegisterClassExW, SetWindowLongPtrW,
-    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_DESTROY, WM_QUIT, WNDCLASSEXW,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA,
+    GetCursorPos, GetMessageW, GetWindowLongPtrW, HMENU, InsertMenuItemW, LoadIconW, MENUITEMINFOW,
+    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STRING, MSG, PostQuitMessage, RegisterClassExW,
+    SetForegroundWindow, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON,
+    TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_DESTROY, WM_QUIT,
+    WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows::core::PCWSTR;
-use windows_core::{BOOL, GUID};
+use windows_core::{BOOL, GUID, PWSTR};
 
 mod policy_config;
 use policy_config::IPolicyConfig;
@@ -87,11 +90,56 @@ fn string_to_tip(s: &str) -> [u16; 128] {
 }
 
 #[derive(Debug)]
-struct AudioSwitch {}
+struct AudioSwitch {
+    window: HWND,
+    popup_menu: HMENU,
+}
 
 impl AudioSwitch {
     fn hello(&self) {
         info!("Hello from AudioSwitch!: {self:?}");
+    }
+    fn show_popup_menu(&self, x: i32, y: i32) -> Result<(), Box<dyn Error>> {
+        debug!("Showing popup menu at ({}, {})", x, y);
+        unsafe {
+            // Required to ensure the popup menu disappears again when a user clicks elsewhere.
+            SetForegroundWindow(self.window).ok()?;
+            TrackPopupMenuEx(
+                self.popup_menu,
+                TPM_LEFTALIGN.0 | TPM_BOTTOMALIGN.0 | TPM_RIGHTBUTTON.0,
+                x,
+                y,
+                self.window,
+                None,
+            )
+            .ok()?;
+        }
+        Ok(())
+    }
+}
+
+const POPUP_EXIT_ID: u32 = 1;
+
+unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
+    unsafe {
+        let menu = CreatePopupMenu()?;
+        debug!("Popup menu created: {:?}", menu);
+        // Add a menu item to exit the application.
+        InsertMenuItemW(
+            menu,
+            0,
+            true,
+            &MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
+                fType: MFT_STRING,
+                dwTypeData: PWSTR("Exit\0".encode_utf16().collect::<Vec<u16>>().as_mut_ptr()),
+                cch: "Exit".len() as u32,
+                wID: POPUP_EXIT_ID,
+                ..Default::default()
+            },
+        )?;
+        Ok(menu)
     }
 }
 
@@ -138,8 +186,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             error!("Failed to create window: {:?} {:?}", err, GetLastError());
         })?;
         debug!("Window created: {:?}", window);
-        let me = Box::new(AudioSwitch {});
-        SetWindowLongPtrW(window, GWLP_USERDATA, Box::into_raw(me) as isize);
+        let me = AudioSwitch {
+            window,
+            popup_menu: create_popup_menu()?,
+        };
+        SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
         let icon = LoadIconW(Some(module.into()), to_pcwstr("audio_icon"))?;
         let guid = GUID::new()?;
         let notify_icon_data = &mut NOTIFYICONDATAW {
@@ -256,6 +307,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+const TASKBAR_CB_ID: u32 = WM_APP + 0x42;
+#[allow(non_snake_case)]
+pub fn LOWORD(l: isize) -> isize {
+    l & 0xffff
+}
+
+#[allow(non_snake_case)]
+pub fn HIWORD(l: isize) -> isize {
+    (l >> 16) & 0xffff
+}
+
 unsafe extern "system" fn window_callback(
     hwnd: windows::Win32::Foundation::HWND,
     msg: u32,
@@ -272,6 +334,23 @@ unsafe extern "system" fn window_callback(
             raw_me.as_mut().unwrap().hello();
         }
         match msg {
+            TASKBAR_CB_ID => match LOWORD(lparam.0) as u32 {
+                WM_RBUTTONUP => {
+                    debug!("Right click received");
+                    let mut cursor_pos = POINT::default();
+                    GetCursorPos(&mut cursor_pos).unwrap();
+                    match raw_me
+                        .as_mut()
+                        .unwrap()
+                        .show_popup_menu(cursor_pos.x, cursor_pos.y)
+                    {
+                        Ok(()) => debug!("Popup menu shown successfully"),
+                        Err(e) => error!("Failed to show popup menu: {:?}", e),
+                    }
+                    LRESULT(0)
+                }
+                _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+            },
             WM_DESTROY => {
                 PostQuitMessage(0);
                 LRESULT(0)
