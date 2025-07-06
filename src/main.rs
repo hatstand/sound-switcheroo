@@ -18,9 +18,9 @@ use windows::Win32::UI::Shell::{
     NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, LoadIconW, MSG,
-    PostQuitMessage, RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
-    WM_DESTROY, WM_QUIT, WNDCLASSEXW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
+    GetWindowLongPtrW, LoadIconW, MSG, PostQuitMessage, RegisterClassExW, SetWindowLongPtrW,
+    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_DESTROY, WM_QUIT, WNDCLASSEXW,
 };
 use windows::core::PCWSTR;
 use windows_core::{BOOL, GUID};
@@ -86,6 +86,15 @@ fn string_to_tip(s: &str) -> [u16; 128] {
     ret
 }
 
+#[derive(Debug)]
+struct AudioSwitch {}
+
+impl AudioSwitch {
+    fn hello(&self) {
+        info!("Hello from AudioSwitch!: {self:?}");
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     info!("Audio Switch Tool");
@@ -129,6 +138,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             error!("Failed to create window: {:?} {:?}", err, GetLastError());
         })?;
         debug!("Window created: {:?}", window);
+        let me = Box::new(AudioSwitch {});
+        SetWindowLongPtrW(window, GWLP_USERDATA, Box::into_raw(me) as isize);
         let icon = LoadIconW(Some(module.into()), to_pcwstr("audio_icon"))?;
         let guid = GUID::new()?;
         let notify_icon_data = &mut NOTIFYICONDATAW {
@@ -255,11 +266,17 @@ unsafe extern "system" fn window_callback(
         "Window callback: hwnd={:?}, msg={:#x}, wparam={:#x}, lparam={:#x}",
         hwnd, msg, wparam.0, lparam.0
     );
-    match msg {
-        WM_DESTROY => {
-            PostQuitMessage(0);
-            LRESULT(0)
+    unsafe {
+        let raw_me = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AudioSwitch;
+        if !raw_me.is_null() {
+            raw_me.as_mut().unwrap().hello();
         }
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        match msg {
+            WM_DESTROY => {
+                PostQuitMessage(0);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
     }
 }
