@@ -15,6 +15,7 @@ use windows::Win32::System::Com::{
 };
 use windows::core::HRESULT;
 use windows::core::{GUID, Interface, PCWSTR};
+use windows_core::BOOL;
 
 // See https://github.com/Belphemur/AudioEndPointLibrary/blob/master/DefSound/PolicyConfig.h
 
@@ -29,9 +30,9 @@ pub struct IPolicyConfig_Vtbl {
 
     // TODO: Confused.
     // The known interface does not include these methods, but they fix the offset for SetDefaultEndpoint.
-    pub MysteryMethod1: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
-    pub MysteryMethod2: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
-    pub MysteryMethod3: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
+    // pub MysteryMethod1: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
+    // pub MysteryMethod2: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
+    // pub MysteryMethod3: unsafe extern "system" fn(this: *mut c_void) -> HRESULT,
     pub GetMixFormat:
         unsafe extern "system" fn(this: *mut c_void, PCWSTR, *mut *mut WAVEFORMATEX) -> HRESULT,
     pub GetDeviceFormat: unsafe extern "system" fn(
@@ -74,6 +75,237 @@ pub struct IPolicyConfig_Vtbl {
     pub SetEndpointVisibility: unsafe extern "system" fn(this: *mut c_void, PCWSTR, i32) -> HRESULT,
 }
 
+windows_core::imp::define_interface!(
+    IPolicyConfig,
+    IPolicyConfig_Vtbl,
+    0xf8679f50_850a_41cf_9c72_430f290290c8
+);
+windows_core::imp::interface_hierarchy!(IPolicyConfig, windows_core::IUnknown);
+impl IPolicyConfig {
+    pub unsafe fn GetMixFormat<P0>(
+        &self,
+        device_name: P0,
+    ) -> windows_core::Result<*mut WAVEFORMATEX>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            let mut result__ = core::mem::zeroed::<*mut WAVEFORMATEX>();
+            (Interface::vtable(self).GetMixFormat)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::Type::from_abi(result__))
+        }
+    }
+
+    pub unsafe fn GetDeviceFormat<P0>(
+        &self,
+        device_name: P0,
+        default: impl Into<BOOL>,
+    ) -> windows_core::Result<*mut WAVEFORMATEX>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            let mut result__ = core::mem::zeroed::<*mut WAVEFORMATEX>();
+            (Interface::vtable(self).GetDeviceFormat)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                default.into().0,
+                &mut result__,
+            )
+            .and_then(|| windows_core::Type::from_abi(result__))
+        }
+    }
+
+    pub unsafe fn ResetDeviceFormat<P0>(&self, device_name: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            (Interface::vtable(self).ResetDeviceFormat)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+            )
+            .ok()
+        }
+    }
+
+    pub unsafe fn SetDeviceFormat<P0>(
+        &self,
+        device_name: P0,
+        mut endpoint_format: WAVEFORMATEX,
+        mut mix_format: WAVEFORMATEX,
+    ) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            (Interface::vtable(self).SetDeviceFormat)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                &mut endpoint_format,
+                &mut mix_format,
+            )
+            .ok()
+        }
+    }
+
+    pub unsafe fn GetProcessingPeriod<P0>(
+        &self,
+        device_name: P0,
+        default: impl Into<BOOL>,
+        default_period: *mut i64,
+        min_period: *mut i64,
+    ) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        (Interface::vtable(self).GetProcessingPeriod)(
+            Interface::as_raw(self),
+            device_name.param().abi(),
+            default.into().0,
+            default_period,
+            min_period,
+        )
+        .ok()
+    }
+
+    pub unsafe fn SetProcessingPeriod<P0>(
+        &self,
+        device_name: P0,
+        period: *mut i64,
+    ) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        (Interface::vtable(self).SetProcessingPeriod)(
+            Interface::as_raw(self),
+            device_name.param().abi(),
+            period,
+        )
+        .ok()
+    }
+
+    pub unsafe fn GetShareMode<P0>(
+        &self,
+        device_name: P0,
+    ) -> windows_core::Result<DeviceSharingMode>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            let mut result__ = core::mem::zeroed::<DeviceSharingMode>();
+            (Interface::vtable(self).GetShareMode)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::Type::from_abi(result__))
+        }
+    }
+
+    pub unsafe fn SetShareMode<P0>(
+        &self,
+        device_name: P0,
+        mut mode: DeviceSharingMode,
+    ) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            (Interface::vtable(self).SetShareMode)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                &mut mode,
+            )
+            .ok()
+        }
+    }
+
+    pub unsafe fn GetPropertyValue<P0>(
+        &self,
+        device_name: P0,
+        bFxStore: impl Into<BOOL>,
+        key: *const PROPERTYKEY,
+    ) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            let mut result__ = core::mem::zeroed::<PROPVARIANT>();
+            (Interface::vtable(self).GetPropertyValue)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                bFxStore.into().0,
+                key,
+                &mut result__,
+            )
+            .ok()
+        }
+    }
+
+    pub unsafe fn SetPropertyValue<P0>(
+        &self,
+        device_name: P0,
+        bFxStore: impl Into<BOOL>,
+        key: *const PROPERTYKEY,
+        propvar: *mut PROPVARIANT,
+    ) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            (Interface::vtable(self).SetPropertyValue)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                bFxStore.into().0,
+                key,
+                propvar,
+            )
+            .ok()
+        }
+    }
+
+    pub unsafe fn SetDefaultEndpoint<P0>(
+        &self,
+        device_name: P0,
+        role: ERole,
+    ) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            (Interface::vtable(self).SetDefaultEndpoint)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                role,
+            )
+            .ok()
+        }
+    }
+
+    pub unsafe fn SetEndpointVisibility<P0>(
+        &self,
+        device_name: P0,
+        visible: impl Into<BOOL>,
+    ) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<PCWSTR>,
+    {
+        unsafe {
+            (Interface::vtable(self).SetEndpointVisibility)(
+                Interface::as_raw(self),
+                device_name.param().abi(),
+                visible.into().0,
+            )
+            .ok()
+        }
+    }
+}
+
 /// Sets the default audio endpoint for the specified role using raw COM interface calls
 ///
 pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
@@ -85,17 +317,8 @@ pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn 
 
         // Create the PolicyConfig instance as IUnknown first
         println!("Debug: Creating PolicyConfig COM instance...");
-        let unknown: windows::core::IUnknown =
-            match CoCreateInstance(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL) {
-                Ok(instance) => {
-                    println!("Debug: PolicyConfig instance created successfully");
-                    instance
-                }
-                Err(e) => {
-                    println!("Debug: Failed to create PolicyConfig instance: {:?}", e);
-                    return Err(format!("Failed to create PolicyConfig instance: {:?}", e).into());
-                }
-            };
+        let policy_config: IPolicyConfig =
+            CoCreateInstance(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL)?;
 
         // Convert device_id to wide string
         let wide_device_id = device_id
@@ -104,36 +327,22 @@ pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn 
             .collect::<Vec<u16>>();
         let pcwstr_device_id = PCWSTR::from_raw(wide_device_id.as_ptr());
 
-        println!(
-            "Debug: Device ID converted to wide string, length: {}",
-            wide_device_id.len()
-        );
-
         // Call SetDefaultEndpoint directly using the vtable
-        let vtable: *const IPolicyConfig_Vtbl =
-            std::mem::transmute(*(unknown.as_raw() as *const *const usize));
+        // let vtable: *const IPolicyConfig_Vtbl =
+        //     std::mem::transmute(*(unknown.as_raw() as *const *const usize));
 
-        let set_default_endpoint_fn = &(*vtable).SetDefaultEndpoint;
-        println!(
-            "Debug: VTable address: {:p}, FnAddr: {:p}",
-            vtable, set_default_endpoint_fn,
-        );
+        // let set_default_endpoint_fn = &(*vtable).SetDefaultEndpoint;
+        // println!(
+        //     "Debug: VTable address: {:p}, FnAddr: {:p}",
+        //     vtable, set_default_endpoint_fn,
+        // );
 
-        println!("Debug: Calling SetDefaultEndpoint...");
-        let hr = set_default_endpoint_fn(unknown.as_raw(), pcwstr_device_id, role);
+        // println!("Debug: Calling SetDefaultEndpoint...");
+        // let hr = set_default_endpoint_fn(unknown.as_raw(), pcwstr_device_id, role);
 
-        println!("Debug: SetDefaultEndpoint returned HRESULT: 0x{:08X}", hr.0);
+        // println!("Debug: SetDefaultEndpoint returned HRESULT: 0x{:08X}", hr.0);
 
-        if hr.is_ok() {
-            println!("Debug: SetDefaultEndpoint succeeded");
-        } else {
-            println!(
-                "Debug: SetDefaultEndpoint failed with HRESULT: 0x{:08X}",
-                hr.0
-            );
-            return Err(format!("SetDefaultEndpoint failed with HRESULT: 0x{:08X}", hr.0).into());
-        }
-
+        policy_config.SetDefaultEndpoint(pcwstr_device_id, role)?;
         Ok(())
     }
 }
