@@ -1,0 +1,32 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+    - name: Install Windows toolchain
+      run: rustup target add x86_64-pc-windows-gnu
+    - name: Install clippy
+      run: rustup component add clippy
+    - name: Install Mingw-w64 toolchain
+      run: sudo apt install binutils-mingw-w64-x86-64 gcc-mingw-w64 nsis
+    - uses: actions/checkout@v4
+    - name: Run clippy
+      run: cargo clippy
+    - name: Calendar Version
+      id: calendar-version
+      run: |
+        set -x
+        readonly VERSION="$(date +%Y%m%d)-${GITHUB_RUN_NUMBER}"
+        echo "Version: $VERSION"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
