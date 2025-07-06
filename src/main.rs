@@ -306,9 +306,13 @@ impl IPolicyConfig {
     }
 }
 
+fn to_pcwstr(s: &str) -> PCWSTR {
+    let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
+    PCWSTR::from_raw(wide.as_ptr())
+}
+
 /// Sets the default audio endpoint for the specified role using raw COM interface calls
-///
-pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
+fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
     unsafe {
         println!(
             "Debug: Attempting to set default endpoint for device: {}, role: {:?}",
@@ -326,21 +330,6 @@ pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn 
             .chain(Some(0))
             .collect::<Vec<u16>>();
         let pcwstr_device_id = PCWSTR::from_raw(wide_device_id.as_ptr());
-
-        // Call SetDefaultEndpoint directly using the vtable
-        // let vtable: *const IPolicyConfig_Vtbl =
-        //     std::mem::transmute(*(unknown.as_raw() as *const *const usize));
-
-        // let set_default_endpoint_fn = &(*vtable).SetDefaultEndpoint;
-        // println!(
-        //     "Debug: VTable address: {:p}, FnAddr: {:p}",
-        //     vtable, set_default_endpoint_fn,
-        // );
-
-        // println!("Debug: Calling SetDefaultEndpoint...");
-        // let hr = set_default_endpoint_fn(unknown.as_raw(), pcwstr_device_id, role);
-
-        // println!("Debug: SetDefaultEndpoint returned HRESULT: 0x{:08X}", hr.0);
 
         policy_config.SetDefaultEndpoint(pcwstr_device_id, role)?;
         Ok(())
