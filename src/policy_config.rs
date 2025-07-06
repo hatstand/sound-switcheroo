@@ -13,7 +13,6 @@ use windows_core::{BOOL, GUID};
 
 // CLSID for the PolicyConfig class
 pub const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
-pub const IID_POLICY_CONFIG: GUID = GUID::from_u128(0xf8679f50_850a_41cf_9c72_430f290290c8);
 
 // VTable for the undocumented PolicyConfig interface.
 #[repr(C)]
