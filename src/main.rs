@@ -17,8 +17,7 @@ use policy_config::IPolicyConfig;
 fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
     unsafe {
         println!(
-            "Debug: Attempting to set default endpoint for device: {}, role: {:?}",
-            device_id, role
+            "Debug: Attempting to set default endpoint for device: {device_id}, role: {role:?}",
         );
 
         // Create the PolicyConfig instance as IUnknown first
@@ -82,18 +81,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             );
             let props = endpoint.OpenPropertyStore(STGM_READ)?;
             let friendly_name = props.GetValue(&PKEY_Device_FriendlyName)?;
-            println!("  Friendly name: {:?}", friendly_name);
-            println!("  Device ID (raw): {:?}", device_id);
-            println!("  Device ID (string): {}", device_id_str);
+            println!("  Friendly name: {friendly_name:?}");
+            println!("  Device ID (raw): {device_id:?}");
+            println!("  Device ID (string): {device_id_str}");
 
             // Example usage: Set the first device as default for console role
             if i == 0 {
-                println!("Setting device as default: {}", device_id_str);
+                println!("Setting device as default: {device_id_str}");
 
                 // Show current default before change
                 match get_current_default_endpoint(windows::Win32::Media::Audio::eConsole) {
-                    Ok(current) => println!("Current default before change: {}", current),
-                    Err(e) => println!("Failed to get current default: {}", e),
+                    Ok(current) => println!("Current default before change: {current}"),
+                    Err(e) => println!("Failed to get current default: {e}"),
                 }
 
                 match set_default_endpoint(&device_id_str, windows::Win32::Media::Audio::eConsole) {
@@ -101,11 +100,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         println!("Successfully set default endpoint!");
                         // Check if it actually changed
                         match get_current_default_endpoint(windows::Win32::Media::Audio::eConsole) {
-                            Ok(current) => println!("Current default after change: {}", current),
-                            Err(e) => println!("Failed to get current default after change: {}", e),
+                            Ok(current) => println!("Current default after change: {current}"),
+                            Err(e) => println!("Failed to get current default after change: {e}"),
                         }
                     }
-                    Err(e) => println!("Failed to set default endpoint: {}", e),
+                    Err(e) => println!("Failed to set default endpoint: {e}"),
                 }
             }
         }
@@ -113,14 +112,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Get and display the current default endpoint for comparison
         for role in [eConsole, eMultimedia, eCommunications] {
             match get_current_default_endpoint(role) {
-                Ok(device_id_str) => println!(
-                    "Current default endpoint for role {:?}: {:?}",
-                    role, device_id_str
-                ),
-                Err(e) => println!(
-                    "Failed to get current default endpoint for role {:?}: {}",
-                    role, e
-                ),
+                Ok(device_id_str) => {
+                    println!("Current default endpoint for role {role:?}: {device_id_str:?}")
+                }
+                Err(e) => println!("Failed to get current default endpoint for role {role:?}: {e}"),
             }
         }
     };
