@@ -39,6 +39,8 @@ use windows_core::{BOOL, GUID, PWSTR};
 mod policy_config;
 use policy_config::IPolicyConfig;
 
+const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
+
 /// Sets the default audio endpoint for the specified role using raw COM interface calls
 fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
     unsafe {
@@ -576,12 +578,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             .chain(Some(0))
             .collect::<Vec<u16>>();
         let icon = LoadIconW(Some(module.into()), PCWSTR(icon_name.as_ptr()))?;
-        let guid = GUID::new()?;
         let notify_icon_data = &mut NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: window,
             hIcon: icon,
-            guidItem: guid,
+            guidItem: NOTIFY_ICON_GUID,
             // Both NIF_TIP & NIF_SHOWTIP are required to actually show the tooltip.
             uFlags: NIF_ICON | NIF_MESSAGE | NIF_GUID | NIF_TIP | NIF_SHOWTIP,
             uCallbackMessage: WM_APP + 0x42,
@@ -601,7 +602,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                     uFlags: NIF_GUID,
                     hWnd: window,
-                    guidItem: guid,
+                    guidItem: NOTIFY_ICON_GUID,
                     ..Default::default()
                 },
             );
