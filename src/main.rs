@@ -22,11 +22,11 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA,
     GetCursorPos, GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, HMENU, InsertMenuItemW,
-    LoadIconW, MENUITEMINFOW, MFS_CHECKED, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE,
-    MIIM_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassExW, SetForegroundWindow,
-    SetMenuItemInfoW, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON,
-    TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
-    WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
+    LoadIconW, MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE,
+    MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassExW,
+    SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
+    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows::core::PCWSTR;
 use windows_core::{BOOL, GUID, PWSTR};
@@ -216,6 +216,18 @@ unsafe fn create_popup_menu(
                 ..Default::default()
             },
         )?;
+        // Add a separator.
+        InsertMenuItemW(
+            menu,
+            0,
+            true,
+            &MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE,
+                fType: MFT_SEPARATOR,
+                ..Default::default()
+            },
+        )?;
 
         for device in devices.iter().rev() {
             debug!(
@@ -250,6 +262,37 @@ unsafe fn create_popup_menu(
                 },
             )?;
         }
+        // Add a separator.
+        InsertMenuItemW(
+            menu,
+            0,
+            true,
+            &MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE,
+                fType: MFT_SEPARATOR,
+                ..Default::default()
+            },
+        )?; // Add a nice name to the top of the menu.
+        InsertMenuItemW(
+            menu,
+            0,
+            true,
+            &MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING,
+                fType: MFT_STRING,
+                dwTypeData: PWSTR(
+                    "AudioSwitch\0"
+                        .encode_utf16()
+                        .collect::<Vec<u16>>()
+                        .as_mut_ptr(),
+                ),
+                cch: "AudioSwitch".len() as u32,
+                fState: MFS_DISABLED,
+                ..Default::default()
+            },
+        )?;
 
         Ok(menu)
     }
