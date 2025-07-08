@@ -20,7 +20,7 @@ use windows::Win32::UI::Shell::{
     NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GWLP_USERDATA,
     GetCursorPos, GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, HMENU, InsertMenuItemW,
     LoadIconW, MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE,
     MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassExW,
@@ -73,12 +73,6 @@ fn get_current_default_endpoint(role: ERole) -> Result<String, Box<dyn Error>> {
     }
 }
 
-fn to_pcwstr(s: &str) -> PCWSTR {
-    let mut v = s.encode_utf16().collect::<Vec<u16>>();
-    v.push(0);
-    PCWSTR(v.as_ptr())
-}
-
 fn string_to_tip(s: &str) -> [u16; 128] {
     let mut ret = [0u16; 128];
     let encoded: Vec<u16> = s.encode_utf16().collect();
@@ -105,10 +99,42 @@ struct AudioSwitch {
     available_devices: Vec<AudioDevice>,
 }
 
+impl Drop for AudioSwitch {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyMenu(self.popup_menu);
+        }
+    }
+}
+
 impl AudioSwitch {
     fn show_popup_menu(&self, x: i32, y: i32) -> Result<(), Box<dyn Error>> {
         debug!("Showing popup menu at ({x}, {y})");
         unsafe {
+            // Highlight the current device in the popup menu.
+            let current_device_id = get_current_default_endpoint(eConsole)?;
+            let current_device = self
+                .available_devices
+                .iter()
+                .find(|d| d.id == current_device_id)
+                .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
+            let mut current_name = current_device
+                .friendly_name
+                .encode_utf16()
+                .chain(Some(0))
+                .collect::<Vec<u16>>();
+
+            let mut mii = MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_STATE,
+                ..Default::default()
+            };
+            GetMenuItemInfoW(self.popup_menu, POPUP_CURRENT_DEVICE_ID, false, &mut mii)?;
+            mii.fMask = MIIM_STRING;
+            mii.dwTypeData = PWSTR(current_name.as_mut_ptr());
+            mii.dwItemData = current_device.friendly_name.chars().count();
+            SetMenuItemInfoW(self.popup_menu, POPUP_CURRENT_DEVICE_ID, false, &mii)?;
+
             // Required to ensure the popup menu disappears again when a user clicks elsewhere.
             SetForegroundWindow(self.window).ok()?;
             TrackPopupMenuEx(
@@ -209,8 +235,9 @@ impl AudioSwitch {
     }
 }
 
-// Technically, this could collide but it's unlikely.
+// Technically, these could collide but it's unlikely.
 const POPUP_EXIT_ID: u32 = 1;
+const POPUP_CURRENT_DEVICE_ID: u32 = 2;
 
 // Converts a device ID to a unique deterministic 16-bit ID for use in the popup menu.
 // This must only use the low 16 bits as it is received via `LOWORD` in the WM_COMMAND callback.
@@ -218,11 +245,15 @@ fn device_id_to_menu_id(device_id: &str) -> u32 {
     State::<crc16::ARC>::calculate(device_id.as_bytes()) as u32
 }
 
-unsafe fn create_popup_menu(devices: &[AudioDevice]) -> Result<HMENU, Box<dyn Error>> {
+unsafe fn create_popup_menu(
+    devices: &[AudioDevice],
+    current_device: &AudioDevice,
+) -> Result<HMENU, Box<dyn Error>> {
     unsafe {
         let menu = CreatePopupMenu()?;
         debug!("Popup menu created: {menu:?}");
         // Add a menu item to exit the application.
+        let mut exit_name = "Exit".encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
         InsertMenuItemW(
             menu,
             0,
@@ -231,8 +262,8 @@ unsafe fn create_popup_menu(devices: &[AudioDevice]) -> Result<HMENU, Box<dyn Er
                 cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
                 fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
                 fType: MFT_STRING,
-                dwTypeData: PWSTR("Exit\0".encode_utf16().collect::<Vec<u16>>().as_mut_ptr()),
-                cch: "Exit".len() as u32,
+                dwTypeData: PWSTR(exit_name.as_mut_ptr()),
+                cch: exit_name.len() as u32 - 1,
                 wID: POPUP_EXIT_ID,
                 ..Default::default()
             },
@@ -256,6 +287,11 @@ unsafe fn create_popup_menu(devices: &[AudioDevice]) -> Result<HMENU, Box<dyn Er
                 device.friendly_name,
                 device_id_to_menu_id(&device.id)
             );
+            let mut device_name = device
+                .friendly_name
+                .encode_utf16()
+                .chain(Some(0))
+                .collect::<Vec<u16>>();
             InsertMenuItemW(
                 menu,
                 0,
@@ -269,15 +305,8 @@ unsafe fn create_popup_menu(devices: &[AudioDevice]) -> Result<HMENU, Box<dyn Er
                     } else {
                         windows::Win32::UI::WindowsAndMessaging::MFS_UNCHECKED
                     },
-                    dwTypeData: PWSTR(
-                        device
-                            .friendly_name
-                            .encode_utf16()
-                            .chain(Some(0))
-                            .collect::<Vec<u16>>()
-                            .as_mut_ptr(),
-                    ),
-                    cch: device.friendly_name.chars().count() as u32,
+                    dwTypeData: PWSTR(device_name.as_mut_ptr()),
+                    cch: device_name.len() as u32 - 1,
                     wID: device_id_to_menu_id(&device.id),
                     ..Default::default()
                 },
@@ -294,7 +323,33 @@ unsafe fn create_popup_menu(devices: &[AudioDevice]) -> Result<HMENU, Box<dyn Er
                 fType: MFT_SEPARATOR,
                 ..Default::default()
             },
-        )?; // Add a nice name to the top of the menu.
+        )?;
+        // Add an item for the current device.
+        let mut current_name = current_device
+            .friendly_name
+            .encode_utf16()
+            .chain(Some(0))
+            .collect::<Vec<u16>>();
+        InsertMenuItemW(
+            menu,
+            0,
+            true,
+            &MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING | MIIM_ID,
+                fType: MFT_STRING,
+                dwTypeData: PWSTR(current_name.as_mut_ptr()),
+                cch: current_device.friendly_name.chars().count() as u32,
+                fState: MFS_DISABLED,
+                wID: POPUP_CURRENT_DEVICE_ID,
+                ..Default::default()
+            },
+        )?;
+        // Add a nice name to the top of the menu.
+        let mut title_name = "AudioSwitch"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect::<Vec<u16>>();
         InsertMenuItemW(
             menu,
             0,
@@ -303,13 +358,8 @@ unsafe fn create_popup_menu(devices: &[AudioDevice]) -> Result<HMENU, Box<dyn Er
                 cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
                 fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING,
                 fType: MFT_STRING,
-                dwTypeData: PWSTR(
-                    "AudioSwitch\0"
-                        .encode_utf16()
-                        .collect::<Vec<u16>>()
-                        .as_mut_ptr(),
-                ),
-                cch: "AudioSwitch".len() as u32,
+                dwTypeData: PWSTR(title_name.as_mut_ptr()),
+                cch: title_name.len() as u32 - 1,
                 fState: MFS_DISABLED,
                 ..Default::default()
             },
@@ -367,26 +417,33 @@ fn main() -> Result<(), Box<dyn Error>> {
             CoUninitialize();
         });
         let module = GetModuleHandleW(None)?;
+        let class_name = "AudioSwitchTool"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect::<Vec<u16>>();
         // Register a window class for the taskbar icon.
-        let class_name = to_pcwstr("AudioSwitchTool");
         let class = RegisterClassExW(&WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(window_callback),
             hInstance: module.into(),
-            lpszClassName: class_name,
+            lpszClassName: PCWSTR(class_name.as_ptr()),
             ..Default::default()
         });
         debug!("Class registered: {class:?}");
         defer!({
             // Unregister the class when done.
-            let _ = UnregisterClassW(class_name, Some(module.into()));
+            let _ = UnregisterClassW(PCWSTR(class_name.as_ptr()), Some(module.into()));
         });
 
         // Seems this needs to _not_ be a message-only window for ShellExecute to work.
+        let window_name = "Audio Switch Tool"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect::<Vec<u16>>();
         let window = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PCWSTR(class as *const u16),
-            to_pcwstr("Audio Switch Tool"),
+            PCWSTR(window_name.as_ptr()),
             WINDOW_STYLE(0),
             0,
             0,
@@ -402,14 +459,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
         debug!("Window created: {window:?}");
         let devices = get_available_audio_devices()?;
+        let current_device_id = get_current_default_endpoint(eConsole)?;
+        let current_device = devices
+            .iter()
+            .find(|d| d.id == current_device_id)
+            .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
         let me = AudioSwitch {
             window,
-            popup_menu: create_popup_menu(&devices)?,
+            popup_menu: create_popup_menu(&devices, current_device)?,
             available_devices: devices,
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
-        let icon = LoadIconW(Some(module.into()), to_pcwstr("audio_icon"))?;
+        let icon_name = "audio_icon"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect::<Vec<u16>>();
+        let icon = LoadIconW(Some(module.into()), PCWSTR(icon_name.as_ptr()))?;
         let guid = GUID::new()?;
         let notify_icon_data = &mut NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -484,10 +550,10 @@ unsafe extern "system" fn window_callback(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    debug!(
-        "Window callback: hwnd={:?}, msg={:#x}, wparam={:#x}, lparam={:#x}",
-        hwnd, msg, wparam.0, lparam.0
-    );
+    // debug!(
+    //     "Window callback: hwnd={:?}, msg={:#x}, wparam={:#x}, lparam={:#x}",
+    //     hwnd, msg, wparam.0, lparam.0
+    // );
     unsafe {
         let raw_me = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AudioSwitch;
         match msg {
