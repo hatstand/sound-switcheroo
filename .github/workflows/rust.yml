@@ -36,7 +36,29 @@ jobs:
       env:
         VERSION: ${{ steps.calendar-version.outputs.version }}
       run: cargo build --verbose --target x86_64-pc-windows-gnu -r
+    - name: Binary version path
+      id: binary-version-path
+      env:
+        VERSION: ${{ steps.calendar-version.outputs.version }}
+      run: |
+        set -x
+        echo "audioswitch_path=${VERSION}.exe >> "$GITHUB_OUTPUT"
+    - name: Version binary
+      env:
+        FINAL_PATH: ${{ steps.binary-version-path.outputs.audioswitch_path}}
+      run: cp target/x86_64-pc-windows-gnu/release/audioswitch.exe $FINAL_PATH
     - name: Generate artifact attestation
       uses: actions/attest-build-provenance@v2
       with:
-        subject-path: 'target/x86_64-pc-windows-gnu/release/audioswitch.exe'
+        subject-path: ${{ steps.binary-version-path.outputs.audioswitch_path }}
+    - name: Create draft pre-release
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        name: ${{ steps.calendar-version.outputs.version }}
+        tag_name: ${{ steps.calendar-version.outputs.version }}
+        files: "audioswitch-*.exe"
+        fail_on_unmatched_files: true
+        draft: false
+        prerelease: false
