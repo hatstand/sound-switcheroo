@@ -42,7 +42,7 @@ jobs:
         VERSION: ${{ steps.calendar-version.outputs.version }}
       run: |
         set -x
-        echo "audioswitch_path=${VERSION}.exe" >> "$GITHUB_OUTPUT"
+        echo "audioswitch_path=audioswitch-${VERSION}.exe" >> "$GITHUB_OUTPUT"
     - name: Version binary
       env:
         FINAL_PATH: ${{ steps.binary-version-path.outputs.audioswitch_path}}
