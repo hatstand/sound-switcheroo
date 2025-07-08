@@ -141,8 +141,14 @@ impl AudioSwitch {
                         LPARAM::default(),
                     )?;
                 }
-                _ => {
-                    debug!("Unknown menu item selected: {}", id);
+                device_offset => {
+                    let device_index = device_offset - DEVICE_ID_START;
+                    if device_index < self.available_devices.len() as u32 {
+                        let selected_device = &self.available_devices[device_index as usize];
+                        set_default_endpoint(&selected_device.id, eConsole)?;
+                    } else {
+                        debug!("Unknown menu item selected: {}", id);
+                    }
                     return Ok(());
                 }
             }
@@ -152,6 +158,7 @@ impl AudioSwitch {
 }
 
 const POPUP_EXIT_ID: u32 = 1;
+const DEVICE_ID_START: u32 = POPUP_EXIT_ID + 1;
 
 unsafe fn create_popup_menu(
     devices: &Vec<AudioDevice>,
@@ -176,7 +183,7 @@ unsafe fn create_popup_menu(
             },
         )?;
 
-        for (i, device) in devices.iter().rev().enumerate() {
+        for (i, device) in devices.iter().enumerate() {
             debug!("Adding device to popup menu: {:?}", device);
             InsertMenuItemW(
                 menu,
@@ -200,7 +207,7 @@ unsafe fn create_popup_menu(
                             .as_mut_ptr(),
                     ),
                     cch: device.friendly_name.chars().count() as u32,
-                    wID: POPUP_EXIT_ID + i as u32, // Unique ID for each device
+                    wID: DEVICE_ID_START + i as u32, // Unique ID for each device
                     ..Default::default()
                 },
             )?;
