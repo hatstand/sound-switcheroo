@@ -195,7 +195,7 @@ fn device_id_to_menu_id(device_id: &str) -> u32 {
 }
 
 unsafe fn create_popup_menu(
-    devices: &Vec<AudioDevice>,
+    devices: &[AudioDevice],
     current_device: &str,
 ) -> Result<HMENU, Box<dyn Error>> {
     unsafe {
