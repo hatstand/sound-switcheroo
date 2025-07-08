@@ -65,6 +65,7 @@ dependencies = [
 name = "audioswitch"
 version = "0.1.0"
 dependencies = [
+ "crc16",
  "defer",
  "embed-resource",
  "env_logger",
@@ -94,6 +95,12 @@ name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
+
+[[package]]
+name = "crc16"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
 
 [[package]]
 name = "defer"

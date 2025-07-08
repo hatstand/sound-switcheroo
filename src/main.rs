@@ -1,34 +1,34 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use crc16::State;
 use defer::defer;
 use log::{debug, error, info};
 use simple_error::bail;
 use std::error::Error;
+use windows::core::PCWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Media::Audio::{
-    ERole, IMMDeviceEnumerator, MMDeviceEnumerator, eCommunications, eConsole, eMultimedia,
-};
+use windows::Win32::Media::Audio::{eConsole, ERole, IMMDeviceEnumerator, MMDeviceEnumerator};
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
     STGM_READ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::{
-    NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
-    NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
+    Shell_NotifyIconW, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
+    NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION_4,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA,
-    GetCursorPos, GetMessageW, GetWindowLongPtrW, HMENU, InsertMenuItemW, LoadIconW, MENUITEMINFOW,
-    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, PostMessageW, PostQuitMessage,
-    RegisterClassExW, SetForegroundWindow, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
-    WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos,
+    GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, InsertMenuItemW, LoadIconW, PostMessageW,
+    PostQuitMessage, RegisterClassExW, SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW,
+    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HMENU, MENUITEMINFOW, MFS_CHECKED,
+    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
+    TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY,
+    WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
-use windows::core::PCWSTR;
 use windows_core::{BOOL, GUID, PWSTR};
 
 mod policy_config;
@@ -37,12 +37,10 @@ use policy_config::IPolicyConfig;
 /// Sets the default audio endpoint for the specified role using raw COM interface calls
 fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
     unsafe {
-        println!(
-            "Debug: Attempting to set default endpoint for device: {device_id}, role: {role:?}",
-        );
+        debug!("Attempting to set default endpoint for device: {device_id}, role: {role:?}",);
 
         // Create the PolicyConfig instance as IUnknown first
-        println!("Debug: Creating PolicyConfig COM instance...");
+        debug!("Creating PolicyConfig COM instance...");
         let policy_config: IPolicyConfig =
             CoCreateInstance(&policy_config::CLSID_POLICY_CONFIG, None, CLSCTX_ALL)?;
 
@@ -107,11 +105,8 @@ struct AudioSwitch {
 }
 
 impl AudioSwitch {
-    fn hello(&self) {
-        info!("Hello from AudioSwitch!: {self:?}");
-    }
     fn show_popup_menu(&self, x: i32, y: i32) -> Result<(), Box<dyn Error>> {
-        debug!("Showing popup menu at ({}, {})", x, y);
+        debug!("Showing popup menu at ({x}, {y})");
         unsafe {
             // Required to ensure the popup menu disappears again when a user clicks elsewhere.
             SetForegroundWindow(self.window).ok()?;
@@ -129,7 +124,7 @@ impl AudioSwitch {
     }
 
     fn menu_selection(&mut self, id: u32) -> Result<(), Box<dyn Error>> {
-        debug!("Menu item selected: {}", id);
+        debug!("Menu item selected: {id}");
         unsafe {
             match id {
                 POPUP_EXIT_ID => {
@@ -141,13 +136,48 @@ impl AudioSwitch {
                         LPARAM::default(),
                     )?;
                 }
-                device_offset => {
-                    let device_index = device_offset - DEVICE_ID_START;
-                    if device_index < self.available_devices.len() as u32 {
-                        let selected_device = &self.available_devices[device_index as usize];
-                        set_default_endpoint(&selected_device.id, eConsole)?;
-                    } else {
-                        debug!("Unknown menu item selected: {}", id);
+                device_menu_id => {
+                    let device = self
+                        .available_devices
+                        .iter()
+                        .find(|device| device_menu_id == device_id_to_menu_id(&device.id));
+                    match device {
+                        None => {
+                            debug!("Unknown menu item selected: {device_menu_id}");
+                            return Ok(());
+                        }
+                        Some(selected_device) => {
+                            if selected_device.id == self.current_device {
+                                debug!(
+                                    "Selected device is already current: {}",
+                                    selected_device.id
+                                );
+                                return Ok(());
+                            }
+                            set_default_endpoint(&selected_device.id, eConsole)?;
+                            // Set this endpoint to checked in the popup menu.
+                            debug!("Checking menu item for id: {device_menu_id}");
+                            let mut mii = MENUITEMINFOW {
+                                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                                fMask: MIIM_STATE,
+                                ..Default::default()
+                            };
+                            GetMenuItemInfoW(self.popup_menu, device_menu_id, false, &mut mii)?;
+                            mii.fMask = MIIM_STATE;
+                            mii.fState |= MFS_CHECKED;
+                            SetMenuItemInfoW(self.popup_menu, device_menu_id, false, &mii)?;
+                            // Uncheck the previously selected device.
+                            let previous_device_id = device_id_to_menu_id(&self.current_device);
+                            debug!(
+                                "Unchecking previously selected device: {previous_device_id}"
+                            );
+                            GetMenuItemInfoW(self.popup_menu, previous_device_id, false, &mut mii)?;
+                            mii.fMask = MIIM_STATE;
+                            mii.fState &= !MFS_CHECKED;
+                            SetMenuItemInfoW(self.popup_menu, previous_device_id, false, &mii)?;
+                            // Update the current device in our internal state.
+                            self.current_device = selected_device.id.clone();
+                        }
                     }
                     return Ok(());
                 }
@@ -157,8 +187,14 @@ impl AudioSwitch {
     }
 }
 
+// Technically, this could collide but it's unlikely.
 const POPUP_EXIT_ID: u32 = 1;
-const DEVICE_ID_START: u32 = POPUP_EXIT_ID + 1;
+
+// Converts a device ID to a unique deterministic 16-bit ID for use in the popup menu.
+// This must only use the low 16 bits as it is received via `LOWORD` in the WM_COMMAND callback.
+fn device_id_to_menu_id(device_id: &str) -> u32 {
+    State::<crc16::ARC>::calculate(device_id.as_bytes()) as u32
+}
 
 unsafe fn create_popup_menu(
     devices: &Vec<AudioDevice>,
@@ -166,7 +202,7 @@ unsafe fn create_popup_menu(
 ) -> Result<HMENU, Box<dyn Error>> {
     unsafe {
         let menu = CreatePopupMenu()?;
-        debug!("Popup menu created: {:?}", menu);
+        debug!("Popup menu created: {menu:?}");
         // Add a menu item to exit the application.
         InsertMenuItemW(
             menu,
@@ -183,8 +219,12 @@ unsafe fn create_popup_menu(
             },
         )?;
 
-        for (i, device) in devices.iter().enumerate() {
-            debug!("Adding device to popup menu: {:?}", device);
+        for device in devices {
+            debug!(
+                "Adding device to popup menu: {:?} {:?}",
+                device.friendly_name,
+                device_id_to_menu_id(&device.id)
+            );
             InsertMenuItemW(
                 menu,
                 0,
@@ -207,7 +247,7 @@ unsafe fn create_popup_menu(
                             .as_mut_ptr(),
                     ),
                     cch: device.friendly_name.chars().count() as u32,
-                    wID: DEVICE_ID_START + i as u32, // Unique ID for each device
+                    wID: device_id_to_menu_id(&device.id),
                     ..Default::default()
                 },
             )?;
@@ -221,14 +261,14 @@ unsafe fn propvariant_to_string(propvar: &PROPVARIANT) -> Result<String, Box<dyn
     unsafe {
         match propvar.vt() {
             VT_LPWSTR => {
-                return Ok(String::from_utf16_lossy(
+                Ok(String::from_utf16_lossy(
                     propvar.Anonymous.Anonymous.Anonymous.pwszVal.as_wide(),
-                ));
+                ))
             }
             _ => {
                 bail!("Unsupported PROPVARIANT type: {:?}", propvar.vt());
             }
-        };
+        }
     }
 }
 
@@ -275,7 +315,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             lpszClassName: class_name,
             ..Default::default()
         });
-        debug!("Class registered: {:?}", class);
+        debug!("Class registered: {class:?}");
         defer!({
             // Unregister the class when done.
             let _ = UnregisterClassW(class_name, Some(module.into()));
@@ -299,14 +339,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .inspect_err(|err| {
             error!("Failed to create window: {:?} {:?}", err, GetLastError());
         })?;
-        debug!("Window created: {:?}", window);
+        debug!("Window created: {window:?}");
         let devices = get_available_audio_devices()?;
         let current_device = get_current_default_endpoint(eConsole)?;
         let me = AudioSwitch {
             window,
             popup_menu: create_popup_menu(&devices, &current_device)?,
             available_devices: devices,
-            current_device: current_device,
+            current_device,
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
@@ -391,9 +431,6 @@ unsafe extern "system" fn window_callback(
     );
     unsafe {
         let raw_me = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AudioSwitch;
-        if !raw_me.is_null() {
-            raw_me.as_mut().unwrap().hello();
-        }
         match msg {
             TASKBAR_CB_ID => match LOWORD(lparam.0) as u32 {
                 WM_RBUTTONUP => {
@@ -406,7 +443,7 @@ unsafe extern "system" fn window_callback(
                         .show_popup_menu(cursor_pos.x, cursor_pos.y)
                     {
                         Ok(()) => debug!("Popup menu shown successfully"),
-                        Err(e) => error!("Failed to show popup menu: {:?}", e),
+                        Err(e) => error!("Failed to show popup menu: {e:?}"),
                     }
                     LRESULT(0)
                 }
