@@ -9,31 +9,31 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
+use windows::core::PCWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Media::Audio::{ERole, IMMDeviceEnumerator, MMDeviceEnumerator, eConsole};
+use windows::Win32::Media::Audio::{eConsole, ERole, IMMDeviceEnumerator, MMDeviceEnumerator};
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
     STGM_READ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::{
-    FOLDERID_RoamingAppData, KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP,
-    NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4,
-    NOTIFYICONDATAW, NOTIFYICONDATAW_0, SHGetKnownFolderPath, Shell_NotifyIconW,
+    FOLDERID_RoamingAppData, SHGetKnownFolderPath, Shell_NotifyIconW, KNOWN_FOLDER_FLAG, NIF_GUID,
+    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NIN_SELECT,
+    NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION_4,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GWLP_USERDATA,
-    GetCursorPos, GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, HMENU, InsertMenuItemW,
-    LoadIconW, MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE,
-    MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassExW,
-    SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GetCursorPos,
+    GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, InsertMenuItemW, LoadIconW, PostMessageW,
+    PostQuitMessage, RegisterClassExW, SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW,
+    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HMENU, MENUITEMINFOW, MFS_CHECKED,
+    MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
     WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
-use windows::core::PCWSTR;
 use windows_core::{BOOL, GUID, PWSTR};
 
 mod policy_config;
@@ -197,7 +197,7 @@ impl AudioSwitch {
 
                             // Save the updated selectable state
                             if let Err(e) = save_device_selectable_state(&self.available_devices) {
-                                error!("Failed to save device selectable state: {}", e);
+                                error!("Failed to save device selectable state: {e}");
                             }
                         }
                     }
