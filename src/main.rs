@@ -5,30 +5,30 @@ use defer::defer;
 use log::{debug, error, info};
 use simple_error::bail;
 use std::error::Error;
-use windows::core::PCWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Media::Audio::{eConsole, ERole, IMMDeviceEnumerator, MMDeviceEnumerator};
+use windows::Win32::Media::Audio::{ERole, IMMDeviceEnumerator, MMDeviceEnumerator, eConsole};
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     STGM_READ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
-    NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION_4,
+    NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
+    NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos,
-    GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, InsertMenuItemW, LoadIconW, PostMessageW,
-    PostQuitMessage, RegisterClassExW, SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW,
-    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HMENU, MENUITEMINFOW, MFS_CHECKED,
-    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-    TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY,
-    WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA,
+    GetCursorPos, GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, HMENU, InsertMenuItemW,
+    LoadIconW, MENUITEMINFOW, MFS_CHECKED, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE,
+    MIIM_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassExW, SetForegroundWindow,
+    SetMenuItemInfoW, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON,
+    TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
+    WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
+use windows::core::PCWSTR;
 use windows_core::{BOOL, GUID, PWSTR};
 
 mod policy_config;
@@ -168,9 +168,7 @@ impl AudioSwitch {
                             SetMenuItemInfoW(self.popup_menu, device_menu_id, false, &mii)?;
                             // Uncheck the previously selected device.
                             let previous_device_id = device_id_to_menu_id(&self.current_device);
-                            debug!(
-                                "Unchecking previously selected device: {previous_device_id}"
-                            );
+                            debug!("Unchecking previously selected device: {previous_device_id}");
                             GetMenuItemInfoW(self.popup_menu, previous_device_id, false, &mut mii)?;
                             mii.fMask = MIIM_STATE;
                             mii.fState &= !MFS_CHECKED;
@@ -219,7 +217,7 @@ unsafe fn create_popup_menu(
             },
         )?;
 
-        for device in devices {
+        for device in devices.iter().rev() {
             debug!(
                 "Adding device to popup menu: {:?} {:?}",
                 device.friendly_name,
@@ -260,11 +258,9 @@ unsafe fn create_popup_menu(
 unsafe fn propvariant_to_string(propvar: &PROPVARIANT) -> Result<String, Box<dyn Error>> {
     unsafe {
         match propvar.vt() {
-            VT_LPWSTR => {
-                Ok(String::from_utf16_lossy(
-                    propvar.Anonymous.Anonymous.Anonymous.pwszVal.as_wide(),
-                ))
-            }
+            VT_LPWSTR => Ok(String::from_utf16_lossy(
+                propvar.Anonymous.Anonymous.Anonymous.pwszVal.as_wide(),
+            )),
             _ => {
                 bail!("Unsupported PROPVARIANT type: {:?}", propvar.vt());
             }
