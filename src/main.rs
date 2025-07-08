@@ -17,7 +17,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::{
     NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
-    NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
+    NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA,
@@ -94,6 +94,8 @@ fn string_to_tip(s: &str) -> [u16; 128] {
 struct AudioDevice {
     id: String,
     friendly_name: String,
+    // Whether this device will be included in the rotation.
+    selectable: bool,
 }
 
 #[derive(Debug)]
@@ -101,7 +103,6 @@ struct AudioSwitch {
     window: HWND,
     popup_menu: HMENU,
     available_devices: Vec<AudioDevice>,
-    current_device: String,
 }
 
 impl AudioSwitch {
@@ -139,7 +140,7 @@ impl AudioSwitch {
                 device_menu_id => {
                     let device = self
                         .available_devices
-                        .iter()
+                        .iter_mut()
                         .find(|device| device_menu_id == device_id_to_menu_id(&device.id));
                     match device {
                         None => {
@@ -147,40 +148,63 @@ impl AudioSwitch {
                             return Ok(());
                         }
                         Some(selected_device) => {
-                            if selected_device.id == self.current_device {
-                                debug!(
-                                    "Selected device is already current: {}",
-                                    selected_device.id
-                                );
-                                return Ok(());
-                            }
-                            set_default_endpoint(&selected_device.id, eConsole)?;
-                            // Set this endpoint to checked in the popup menu.
-                            debug!("Checking menu item for id: {device_menu_id}");
+                            debug!("Toggling menu item for id: {device_menu_id}");
                             let mut mii = MENUITEMINFOW {
                                 cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
                                 fMask: MIIM_STATE,
                                 ..Default::default()
                             };
+                            selected_device.selectable = !selected_device.selectable;
                             GetMenuItemInfoW(self.popup_menu, device_menu_id, false, &mut mii)?;
                             mii.fMask = MIIM_STATE;
-                            mii.fState |= MFS_CHECKED;
+                            mii.fState = if selected_device.selectable {
+                                mii.fState | MFS_CHECKED
+                            } else {
+                                mii.fState & !MFS_CHECKED
+                            };
                             SetMenuItemInfoW(self.popup_menu, device_menu_id, false, &mii)?;
-                            // Uncheck the previously selected device.
-                            let previous_device_id = device_id_to_menu_id(&self.current_device);
-                            debug!("Unchecking previously selected device: {previous_device_id}");
-                            GetMenuItemInfoW(self.popup_menu, previous_device_id, false, &mut mii)?;
-                            mii.fMask = MIIM_STATE;
-                            mii.fState &= !MFS_CHECKED;
-                            SetMenuItemInfoW(self.popup_menu, previous_device_id, false, &mii)?;
-                            // Update the current device in our internal state.
-                            self.current_device = selected_device.id.clone();
                         }
                     }
                     return Ok(());
                 }
             }
         }
+        Ok(())
+    }
+
+    fn next_device(&mut self) -> Result<(), Box<dyn Error>> {
+        let current_device = get_current_default_endpoint(eConsole)?;
+        debug!("Switching to next device from: {current_device}");
+        let current_index = self
+            .available_devices
+            .iter()
+            .position(|d| d.id == current_device)
+            .unwrap_or(0);
+        debug!("Current device index: {current_index}");
+        let selectable_devices: Vec<_> = self
+            .available_devices
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.selectable)
+            .collect();
+        if selectable_devices.is_empty() {
+            debug!("No selectable devices found");
+            return Ok(());
+        }
+
+        let cand = selectable_devices
+            .iter()
+            // Either the first selectable device after the current one,
+            .find(|(i, _)| *i > current_index)
+            // or the first selectable device if none found as a wraparound.
+            .or_else(|| selectable_devices.first())
+            .ok_or_else(|| simple_error::SimpleError::new("No selectable devices found"))?;
+        debug!(
+            "Switching to device: {:?} at index: {:?}",
+            cand.1.friendly_name, cand.0,
+        );
+        set_default_endpoint(&cand.1.id, eConsole)?;
+
         Ok(())
     }
 }
@@ -194,10 +218,7 @@ fn device_id_to_menu_id(device_id: &str) -> u32 {
     State::<crc16::ARC>::calculate(device_id.as_bytes()) as u32
 }
 
-unsafe fn create_popup_menu(
-    devices: &[AudioDevice],
-    current_device: &str,
-) -> Result<HMENU, Box<dyn Error>> {
+unsafe fn create_popup_menu(devices: &[AudioDevice]) -> Result<HMENU, Box<dyn Error>> {
     unsafe {
         let menu = CreatePopupMenu()?;
         debug!("Popup menu created: {menu:?}");
@@ -243,7 +264,7 @@ unsafe fn create_popup_menu(
                     cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
                     fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_STATE,
                     fType: MFT_STRING,
-                    fState: if device.id == current_device {
+                    fState: if device.selectable {
                         windows::Win32::UI::WindowsAndMessaging::MFS_CHECKED
                     } else {
                         windows::Win32::UI::WindowsAndMessaging::MFS_UNCHECKED
@@ -330,6 +351,7 @@ fn get_available_audio_devices() -> Result<Vec<AudioDevice>, Box<dyn Error>> {
             devices.push(AudioDevice {
                 id: device_id_str,
                 friendly_name: propvariant_to_string(&friendly_name)?,
+                selectable: true,
             });
         }
     }
@@ -380,12 +402,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
         debug!("Window created: {window:?}");
         let devices = get_available_audio_devices()?;
-        let current_device = get_current_default_endpoint(eConsole)?;
         let me = AudioSwitch {
             window,
-            popup_menu: create_popup_menu(&devices, &current_device)?,
+            popup_menu: create_popup_menu(&devices)?,
             available_devices: devices,
-            current_device,
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
@@ -481,6 +501,14 @@ unsafe extern "system" fn window_callback(
                         .unwrap()
                         .show_popup_menu(cursor_pos.x, cursor_pos.y)
                     {
+                        Ok(()) => debug!("Popup menu shown successfully"),
+                        Err(e) => error!("Failed to show popup menu: {e:?}"),
+                    }
+                    LRESULT(0)
+                }
+                NIN_SELECT => {
+                    debug!("NIN_SELECT");
+                    match raw_me.as_mut().unwrap().next_device() {
                         Ok(()) => debug!("Popup menu shown successfully"),
                         Err(e) => error!("Failed to show popup menu: {e:?}"),
                     }
