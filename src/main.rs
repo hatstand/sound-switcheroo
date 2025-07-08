@@ -22,14 +22,14 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::{
     FOLDERID_RoamingAppData, SHGetKnownFolderPath, Shell_NotifyIconW, KNOWN_FOLDER_FLAG, NIF_GUID,
-    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NIN_SELECT,
-    NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION_4,
+    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
+    NIN_SELECT, NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION_4,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GetCursorPos,
     GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, InsertMenuItemW, LoadIconW, PostMessageW,
     PostQuitMessage, RegisterClassExW, SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW,
-    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HMENU, MENUITEMINFOW, MFS_CHECKED,
+    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON, HMENU, MENUITEMINFOW, MFS_CHECKED,
     MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
     WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
@@ -102,6 +102,7 @@ struct AudioDevice {
 #[derive(Debug)]
 struct AudioSwitch {
     window: HWND,
+    icon: HICON,
     popup_menu: HMENU,
     available_devices: Vec<AudioDevice>,
 }
@@ -242,6 +243,28 @@ impl AudioSwitch {
             cand.1.friendly_name, cand.0,
         );
         set_default_endpoint(&cand.1.id, eConsole)?;
+        // Update the tooltip to reflect the new current device.
+        let tooltip = cand.1.friendly_name.clone();
+        unsafe {
+            Shell_NotifyIconW(
+                NIM_MODIFY,
+                &NOTIFYICONDATAW {
+                    cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+                    hWnd: self.window,
+                    hIcon: self.icon,
+                    guidItem: NOTIFY_ICON_GUID,
+                    // Both NIF_TIP & NIF_SHOWTIP are required to actually show the tooltip.
+                    uFlags: NIF_ICON | NIF_MESSAGE | NIF_GUID | NIF_TIP | NIF_SHOWTIP,
+                    uCallbackMessage: WM_APP + 0x42,
+                    szTip: string_to_tip(&tooltip),
+                    Anonymous: NOTIFYICONDATAW_0 {
+                        uVersion: NOTIFYICON_VERSION_4,
+                    },
+                    ..Default::default()
+                },
+            )
+            .ok()?;
+        }
 
         Ok(())
     }
@@ -566,18 +589,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             .iter()
             .find(|d| d.id == current_device_id)
             .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
-        let me = AudioSwitch {
-            window,
-            popup_menu: create_popup_menu(&devices, current_device)?,
-            available_devices: devices,
-        };
-        // Store the AudioSwitch instance in the window's user data.
-        SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
+        let tooltip = current_device.friendly_name.clone();
         let icon_name = "audio_icon"
             .encode_utf16()
             .chain(Some(0))
             .collect::<Vec<u16>>();
         let icon = LoadIconW(Some(module.into()), PCWSTR(icon_name.as_ptr()))?;
+        let me = AudioSwitch {
+            window,
+            icon,
+            popup_menu: create_popup_menu(&devices, current_device)?,
+            available_devices: devices,
+        };
+        // Store the AudioSwitch instance in the window's user data.
+        SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
         let notify_icon_data = &mut NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: window,
@@ -586,7 +611,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             // Both NIF_TIP & NIF_SHOWTIP are required to actually show the tooltip.
             uFlags: NIF_ICON | NIF_MESSAGE | NIF_GUID | NIF_TIP | NIF_SHOWTIP,
             uCallbackMessage: WM_APP + 0x42,
-            szTip: string_to_tip("Audio Switch Tool"),
+            szTip: string_to_tip(&tooltip),
             Anonymous: NOTIFYICONDATAW_0 {
                 uVersion: NOTIFYICON_VERSION_4,
             },
