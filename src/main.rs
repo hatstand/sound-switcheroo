@@ -23,7 +23,7 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA,
     GetCursorPos, GetMessageW, GetWindowLongPtrW, HMENU, InsertMenuItemW, LoadIconW, MENUITEMINFOW,
-    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STRING, MSG, PostMessageW, PostQuitMessage,
+    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, PostMessageW, PostQuitMessage,
     RegisterClassExW, SetForegroundWindow, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
     TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
     WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
@@ -153,7 +153,10 @@ impl AudioSwitch {
 
 const POPUP_EXIT_ID: u32 = 1;
 
-unsafe fn create_popup_menu(devices: &Vec<AudioDevice>) -> Result<HMENU, Box<dyn Error>> {
+unsafe fn create_popup_menu(
+    devices: &Vec<AudioDevice>,
+    current_device: &str,
+) -> Result<HMENU, Box<dyn Error>> {
     unsafe {
         let menu = CreatePopupMenu()?;
         debug!("Popup menu created: {:?}", menu);
@@ -181,8 +184,13 @@ unsafe fn create_popup_menu(devices: &Vec<AudioDevice>) -> Result<HMENU, Box<dyn
                 true,
                 &MENUITEMINFOW {
                     cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                    fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
+                    fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_STATE,
                     fType: MFT_STRING,
+                    fState: if device.id == current_device {
+                        windows::Win32::UI::WindowsAndMessaging::MFS_CHECKED
+                    } else {
+                        windows::Win32::UI::WindowsAndMessaging::MFS_UNCHECKED
+                    },
                     dwTypeData: PWSTR(
                         device
                             .friendly_name
@@ -286,11 +294,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
         debug!("Window created: {:?}", window);
         let devices = get_available_audio_devices()?;
+        let current_device = get_current_default_endpoint(eConsole)?;
         let me = AudioSwitch {
             window,
-            popup_menu: create_popup_menu(&devices)?,
+            popup_menu: create_popup_menu(&devices, &current_device)?,
             available_devices: devices,
-            current_device: get_current_default_endpoint(eConsole)?,
+            current_device: current_device,
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
