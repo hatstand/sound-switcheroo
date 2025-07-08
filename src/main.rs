@@ -3,8 +3,12 @@
 use crc16::State;
 use defer::defer;
 use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
 use simple_error::bail;
+use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
+use std::path::PathBuf;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{ERole, IMMDeviceEnumerator, MMDeviceEnumerator, eConsole};
@@ -16,8 +20,9 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::{
-    NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
-    NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
+    FOLDERID_RoamingAppData, KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP,
+    NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4,
+    NOTIFYICONDATAW, NOTIFYICONDATAW_0, SHGetKnownFolderPath, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GWLP_USERDATA,
@@ -84,7 +89,7 @@ fn string_to_tip(s: &str) -> [u16; 128] {
     ret
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct AudioDevice {
     id: String,
     friendly_name: String,
@@ -189,6 +194,11 @@ impl AudioSwitch {
                                 mii.fState & !MFS_CHECKED
                             };
                             SetMenuItemInfoW(self.popup_menu, device_menu_id, false, &mii)?;
+
+                            // Save the updated selectable state
+                            if let Err(e) = save_device_selectable_state(&self.available_devices) {
+                                error!("Failed to save device selectable state: {}", e);
+                            }
                         }
                     }
                     return Ok(());
@@ -408,6 +418,93 @@ fn get_available_audio_devices() -> Result<Vec<AudioDevice>, Box<dyn Error>> {
     Ok(devices)
 }
 
+/// Gets the path to the user's roaming AppData directory
+fn get_roaming_appdata_path() -> Result<PathBuf, Box<dyn Error>> {
+    unsafe {
+        let path_ptr =
+            SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KNOWN_FOLDER_FLAG::default(), None)?;
+
+        let path_str = path_ptr.to_string()?;
+        let path = PathBuf::from(path_str);
+
+        // Free the memory allocated by SHGetKnownFolderPath
+        windows::Win32::System::Com::CoTaskMemFree(Some(path_ptr.as_ptr() as *const _));
+
+        Ok(path)
+    }
+}
+
+/// Gets the full path to the AudioSwitch configuration file
+fn get_config_file_path() -> Result<PathBuf, Box<dyn Error>> {
+    let mut path = get_roaming_appdata_path()?;
+    path.push("PurpleHatstands");
+    path.push("AudioSwitch");
+
+    // Create the directory if it doesn't exist
+    if !path.exists() {
+        fs::create_dir_all(&path)?;
+    }
+
+    path.push("device_config.json");
+    debug!("Config file path: {}", path.display());
+    Ok(path)
+}
+
+/// Saves the selectable state of devices to a JSON file in the roaming AppData directory
+fn save_device_selectable_state(devices: &[AudioDevice]) -> Result<(), Box<dyn Error>> {
+    let config_path = get_config_file_path()?;
+
+    // Create a map of device_id -> selectable state
+    let device_states: HashMap<String, bool> = devices
+        .iter()
+        .map(|device| (device.id.clone(), device.selectable))
+        .collect();
+
+    let json_data = serde_json::to_string_pretty(&device_states)?;
+    fs::write(&config_path, json_data)?;
+
+    debug!(
+        "Saved device selectable state to: {}",
+        config_path.display()
+    );
+    Ok(())
+}
+
+/// Loads the selectable state of devices from the JSON file in the roaming AppData directory
+fn load_device_selectable_state() -> Result<HashMap<String, bool>, Box<dyn Error>> {
+    let config_path = get_config_file_path()?;
+
+    if !config_path.exists() {
+        debug!("Config file does not exist: {}", config_path.display());
+        return Ok(HashMap::new());
+    }
+
+    let json_data = fs::read_to_string(&config_path)?;
+    let device_states: HashMap<String, bool> = serde_json::from_str(&json_data)?;
+
+    debug!(
+        "Loaded device selectable state from: {}",
+        config_path.display()
+    );
+    Ok(device_states)
+}
+
+/// Applies the loaded selectable state to the current devices
+fn apply_device_selectable_state(
+    devices: &mut [AudioDevice],
+    saved_states: &HashMap<String, bool>,
+) {
+    for device in devices.iter_mut() {
+        if let Some(&selectable) = saved_states.get(&device.id) {
+            device.selectable = selectable;
+            debug!(
+                "Applied selectable state for device {}: {}",
+                device.friendly_name, selectable
+            );
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     info!("Audio Switch Tool");
@@ -458,7 +555,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             error!("Failed to create window: {:?} {:?}", err, GetLastError());
         })?;
         debug!("Window created: {window:?}");
-        let devices = get_available_audio_devices()?;
+        let mut devices = get_available_audio_devices()?;
+        // Load and apply device selectable state
+        let saved_states = load_device_selectable_state()?;
+        apply_device_selectable_state(&mut devices, &saved_states);
         let current_device_id = get_current_default_endpoint(eConsole)?;
         let current_device = devices
             .iter()
@@ -589,6 +689,9 @@ unsafe extern "system" fn window_callback(
                 LRESULT(0)
             }
             WM_DESTROY => {
+                // Save the device selectable state on exit
+                let _ = save_device_selectable_state(&raw_me.as_ref().unwrap().available_devices);
+
                 PostQuitMessage(0);
                 LRESULT(0)
             }
