@@ -2,17 +2,20 @@
 
 use defer::defer;
 use log::{debug, error, info};
+use simple_error::bail;
 use std::error::Error;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{
     ERole, IMMDeviceEnumerator, MMDeviceEnumerator, eCommunications, eConsole, eMultimedia,
 };
+use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     STGM_READ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::{
     NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION,
     NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0, Shell_NotifyIconW,
@@ -90,9 +93,17 @@ fn string_to_tip(s: &str) -> [u16; 128] {
 }
 
 #[derive(Debug)]
+struct AudioDevice {
+    id: String,
+    friendly_name: String,
+}
+
+#[derive(Debug)]
 struct AudioSwitch {
     window: HWND,
     popup_menu: HMENU,
+    available_devices: Vec<AudioDevice>,
+    current_device: String,
 }
 
 impl AudioSwitch {
@@ -142,7 +153,7 @@ impl AudioSwitch {
 
 const POPUP_EXIT_ID: u32 = 1;
 
-unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
+unsafe fn create_popup_menu(devices: &Vec<AudioDevice>) -> Result<HMENU, Box<dyn Error>> {
     unsafe {
         let menu = CreatePopupMenu()?;
         debug!("Popup menu created: {:?}", menu);
@@ -161,8 +172,74 @@ unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
                 ..Default::default()
             },
         )?;
+
+        for (i, device) in devices.iter().rev().enumerate() {
+            debug!("Adding device to popup menu: {:?}", device);
+            InsertMenuItemW(
+                menu,
+                0,
+                true,
+                &MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
+                    fType: MFT_STRING,
+                    dwTypeData: PWSTR(
+                        device
+                            .friendly_name
+                            .encode_utf16()
+                            .chain(Some(0))
+                            .collect::<Vec<u16>>()
+                            .as_mut_ptr(),
+                    ),
+                    cch: device.friendly_name.chars().count() as u32,
+                    wID: POPUP_EXIT_ID + i as u32, // Unique ID for each device
+                    ..Default::default()
+                },
+            )?;
+        }
+
         Ok(menu)
     }
+}
+
+unsafe fn propvariant_to_string(propvar: &PROPVARIANT) -> Result<String, Box<dyn Error>> {
+    unsafe {
+        match propvar.vt() {
+            VT_LPWSTR => {
+                return Ok(String::from_utf16_lossy(
+                    propvar.Anonymous.Anonymous.Anonymous.pwszVal.as_wide(),
+                ));
+            }
+            _ => {
+                bail!("Unsupported PROPVARIANT type: {:?}", propvar.vt());
+            }
+        };
+    }
+}
+
+fn get_available_audio_devices() -> Result<Vec<AudioDevice>, Box<dyn Error>> {
+    let mut devices = Vec::new();
+    unsafe {
+        let device_enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        let endpoints = device_enumerator.EnumAudioEndpoints(
+            windows::Win32::Media::Audio::eRender,
+            windows::Win32::Media::Audio::DEVICE_STATE_ACTIVE,
+        )?;
+
+        for i in 0..endpoints.GetCount()? {
+            let endpoint = endpoints.Item(i)?;
+            let device_id = endpoint.GetId()?;
+            let device_id_str = device_id.to_string()?;
+            let props = endpoint.OpenPropertyStore(STGM_READ)?;
+            let friendly_name = props.GetValue(&PKEY_Device_FriendlyName)?;
+            devices.push(AudioDevice {
+                id: device_id_str,
+                friendly_name: propvariant_to_string(&friendly_name)?,
+            });
+        }
+    }
+    Ok(devices)
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -208,10 +285,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             error!("Failed to create window: {:?} {:?}", err, GetLastError());
         })?;
         debug!("Window created: {:?}", window);
+        let devices = get_available_audio_devices()?;
         let me = AudioSwitch {
             window,
-            popup_menu: create_popup_menu()?,
+            popup_menu: create_popup_menu(&devices)?,
+            available_devices: devices,
+            current_device: get_current_default_endpoint(eConsole)?,
         };
+        // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
         let icon = LoadIconW(Some(module.into()), to_pcwstr("audio_icon"))?;
         let guid = GUID::new()?;
@@ -246,64 +327,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         });
         // Enable better callback API.
         Shell_NotifyIconW(NIM_SETVERSION, notify_icon_data).ok()?;
-
-        let device_enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        let endpoints = device_enumerator.EnumAudioEndpoints(
-            windows::Win32::Media::Audio::eRender,
-            windows::Win32::Media::Audio::DEVICE_STATE_ACTIVE,
-        )?;
-
-        info!("Available audio devices:");
-        for i in 0..endpoints.GetCount()? {
-            let endpoint = endpoints.Item(i)?;
-            let device_id = endpoint.GetId()?;
-            let device_id_str = device_id.to_string()?;
-            info!(
-                "Device {}: {:?} {:?}",
-                i,
-                device_id_str,
-                endpoint.GetState()?
-            );
-            let props = endpoint.OpenPropertyStore(STGM_READ)?;
-            let friendly_name = props.GetValue(&PKEY_Device_FriendlyName)?;
-            info!("  Friendly name: {friendly_name:?}");
-            info!("  Device ID (raw): {device_id:?}");
-            info!("  Device ID (string): {device_id_str}");
-
-            // Example usage: Set the first device as default for console role
-            if i == 0 {
-                info!("Setting device as default: {device_id_str}");
-
-                // Show current default before change
-                match get_current_default_endpoint(windows::Win32::Media::Audio::eConsole) {
-                    Ok(current) => info!("Current default before change: {current}"),
-                    Err(e) => error!("Failed to get current default: {e}"),
-                }
-
-                match set_default_endpoint(&device_id_str, windows::Win32::Media::Audio::eConsole) {
-                    Ok(()) => {
-                        debug!("Successfully set default endpoint!");
-                        // Check if it actually changed
-                        match get_current_default_endpoint(windows::Win32::Media::Audio::eConsole) {
-                            Ok(current) => info!("Current default after change: {current}"),
-                            Err(e) => error!("Failed to get current default after change: {e}"),
-                        }
-                    }
-                    Err(e) => error!("Failed to set default endpoint: {e}"),
-                }
-            }
-        }
-
-        // Get and display the current default endpoint for comparison
-        for role in [eConsole, eMultimedia, eCommunications] {
-            match get_current_default_endpoint(role) {
-                Ok(device_id_str) => {
-                    info!("Current default endpoint for role {role:?}: {device_id_str:?}")
-                }
-                Err(e) => error!("Failed to get current default endpoint for role {role:?}: {e}"),
-            }
-        }
 
         // Enter the message loop.
         info!("Running...");
