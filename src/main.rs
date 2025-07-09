@@ -50,7 +50,6 @@ fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Erro
         debug!("Attempting to set default endpoint for device: {device_id}, role: {role:?}",);
 
         // Create the PolicyConfig instance as IUnknown first
-        debug!("Creating PolicyConfig COM instance...");
         let policy_config: IPolicyConfig =
             CoCreateInstance(&policy_config::CLSID_POLICY_CONFIG, None, CLSCTX_ALL)?;
 
@@ -220,8 +219,8 @@ impl AudioSwitch {
         debug!("Menu item selected: {id}");
         unsafe {
             match id {
+                // Exit item selected.
                 POPUP_EXIT_ID => {
-                    debug!("Exit selected");
                     PostMessageW(
                         Some(self.window),
                         WM_CLOSE,
@@ -229,6 +228,7 @@ impl AudioSwitch {
                         LPARAM::default(),
                     )?;
                 }
+                // Device checked / unchecked in the popup menu.
                 device_menu_id => {
                     let device = self
                         .available_devices
@@ -289,27 +289,24 @@ impl AudioSwitch {
             return Ok(());
         }
 
-        let cand = selectable_devices
+        let (_, cand_device) = selectable_devices
             .iter()
             // Either the first selectable device after the current one,
             .find(|(i, _)| *i > current_index)
             // or the first selectable device if none found as a wraparound.
             .or_else(|| selectable_devices.first())
             .ok_or_else(|| simple_error::SimpleError::new("No selectable devices found"))?;
-        debug!(
-            "Switching to device: {:?} at index: {:?}",
-            cand.1.friendly_name, cand.0,
-        );
-        set_default_endpoint(&cand.1.id, eConsole)?;
+        info!("Switching to device: {:}", cand_device.friendly_name,);
+        set_default_endpoint(&cand_device.id, eConsole)?;
         // Update the tooltip to reflect the new current device.
-        let tooltip = cand.1.friendly_name.clone();
+        let tooltip = cand_device.friendly_name.clone();
         unsafe {
             Shell_NotifyIconW(
                 NIM_MODIFY,
                 &NOTIFYICONDATAW {
                     cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                     hWnd: self.window,
-                    hIcon: self.icon_for_form_factor(cand.1.form_factor)?,
+                    hIcon: self.icon_for_form_factor(cand_device.form_factor)?,
                     guidItem: NOTIFY_ICON_GUID,
                     // Both NIF_TIP & NIF_SHOWTIP are required to actually show the tooltip.
                     uFlags: NIF_ICON | NIF_MESSAGE | NIF_GUID | NIF_TIP | NIF_SHOWTIP,
@@ -344,7 +341,6 @@ unsafe fn create_popup_menu(
 ) -> Result<HMENU, Box<dyn Error>> {
     unsafe {
         let menu = CreatePopupMenu()?;
-        debug!("Popup menu created: {menu:?}");
         // Add a menu item to exit the application.
         let mut exit_name = "Exit".encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
         InsertMenuItemW(
@@ -642,7 +638,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             lpszClassName: PCWSTR(class_name.as_ptr()),
             ..Default::default()
         });
-        debug!("Class registered: {class:?}");
         defer!({
             // Unregister the class when done.
             let _ = UnregisterClassW(PCWSTR(class_name.as_ptr()), Some(module.into()));
@@ -670,7 +665,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .inspect_err(|err| {
             error!("Failed to create window: {:?} {:?}", err, GetLastError());
         })?;
-        debug!("Window created: {window:?}");
         let mut devices = get_available_audio_devices()?;
         // Load and apply device selectable state
         let saved_states = load_device_selectable_state()?;
@@ -728,7 +722,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         info!("Running...");
         loop {
             let mut msg = MSG::default();
-            debug!("Waiting for message...");
             match GetMessageW(&mut msg, None, 0, 0) {
                 BOOL(0) => {
                     assert_eq!(msg.message, WM_QUIT);
@@ -765,16 +758,12 @@ unsafe extern "system" fn window_callback(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    // debug!(
-    //     "Window callback: hwnd={:?}, msg={:#x}, wparam={:#x}, lparam={:#x}",
-    //     hwnd, msg, wparam.0, lparam.0
-    // );
     unsafe {
         let raw_me = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AudioSwitch;
         match msg {
             TASKBAR_CB_ID => match LOWORD(lparam.0) as u32 {
+                // Right click on the taskbar icon.
                 WM_RBUTTONUP => {
-                    debug!("Right click received");
                     let mut cursor_pos = POINT::default();
                     GetCursorPos(&mut cursor_pos).unwrap();
                     match raw_me
@@ -782,23 +771,23 @@ unsafe extern "system" fn window_callback(
                         .unwrap()
                         .show_popup_menu(cursor_pos.x, cursor_pos.y)
                     {
-                        Ok(()) => debug!("Popup menu shown successfully"),
+                        Ok(()) => {}
                         Err(e) => error!("Failed to show popup menu: {e:?}"),
                     }
                     LRESULT(0)
                 }
+                // Left click on the taskbar icon.
                 NIN_SELECT => {
-                    debug!("NIN_SELECT");
                     match raw_me.as_mut().unwrap().next_device() {
-                        Ok(()) => debug!("Popup menu shown successfully"),
+                        Ok(()) => {}
                         Err(e) => error!("Failed to show popup menu: {e:?}"),
                     }
                     LRESULT(0)
                 }
                 _ => DefWindowProcW(hwnd, msg, wparam, lparam),
             },
+            // Item in popup menu selected.
             WM_COMMAND => {
-                debug!("Menu Command received");
                 let chosen = LOWORD(wparam.0 as isize) as u32;
                 let _ = raw_me.as_mut().unwrap().menu_selection(chosen);
                 LRESULT(0)
