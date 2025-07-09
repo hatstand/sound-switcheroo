@@ -1,4 +1,7 @@
 audio_icon ICON "audio.ico"
 headphones_icon ICON "headphones.ico"
+headphones_icon_dark ICON "headphones_dark.ico"
 headset_icon ICON "headset.ico"
+headset_icon_dark ICON "headset_dark.ico"
 speaker_icon ICON "speaker.ico"
+speaker_icon_dark ICON "speaker_dark.ico"

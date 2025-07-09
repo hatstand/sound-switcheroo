@@ -94,6 +94,31 @@ fn string_to_tip(s: &str) -> [u16; 128] {
     ret
 }
 
+#[derive(Debug)]
+struct AdaptiveIcon {
+    light: HICON,
+    dark: HICON,
+}
+
+impl AdaptiveIcon {
+    pub fn new(light_icon_name: &str, dark_icon_name: &str) -> Result<Self, Box<dyn Error>> {
+        let light_icon = unsafe { load_icon(light_icon_name)? };
+        let dark_icon = unsafe { load_icon(dark_icon_name)? };
+        Ok(Self {
+            light: light_icon,
+            dark: dark_icon,
+        })
+    }
+
+    pub fn icon(&self) -> Result<HICON, Box<dyn Error>> {
+        if is_dark_mode()? {
+            Ok(self.dark)
+        } else {
+            Ok(self.light)
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct AudioDevice {
     id: String,
@@ -107,13 +132,13 @@ struct AudioDevice {
 #[derive(Debug)]
 struct AudioSwitch {
     window: HWND,
-    icon: HICON,
+    icon: AdaptiveIcon,
     popup_menu: HMENU,
     available_devices: Vec<AudioDevice>,
 
-    headphones_icon: HICON,
-    headset_icon: HICON,
-    speaker_icon: HICON,
+    headphones_icon: AdaptiveIcon,
+    headset_icon: AdaptiveIcon,
+    speaker_icon: AdaptiveIcon,
 }
 
 impl Drop for AudioSwitch {
@@ -126,13 +151,17 @@ impl Drop for AudioSwitch {
 
 impl AudioSwitch {
     #![allow(non_upper_case_globals)]
-    fn icon_for_form_factor(&self, form_factor: EndpointFormFactor) -> HICON {
-        match form_factor {
-            Headphones => self.headphones_icon,
-            Headset => self.headset_icon,
-            Speakers => self.speaker_icon,
-            _ => self.icon, // Default icon for other form factors
-        }
+    fn icon_for_form_factor(
+        &self,
+        form_factor: EndpointFormFactor,
+    ) -> Result<HICON, Box<dyn Error>> {
+        let adaptive_icon = match form_factor {
+            Headphones => &self.headphones_icon,
+            Headset => &self.headset_icon,
+            Speakers => &self.speaker_icon,
+            _ => &self.icon, // Default icon for other form factors
+        };
+        adaptive_icon.icon()
     }
 
     fn current_icon(&self) -> Result<HICON, Box<dyn Error>> {
@@ -142,7 +171,7 @@ impl AudioSwitch {
             .iter()
             .find(|d| d.id == current_device_id)
             .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
-        Ok(self.icon_for_form_factor(current_device.form_factor))
+        self.icon_for_form_factor(current_device.form_factor)
     }
 
     fn show_popup_menu(&self, x: i32, y: i32) -> Result<(), Box<dyn Error>> {
@@ -280,7 +309,7 @@ impl AudioSwitch {
                 &NOTIFYICONDATAW {
                     cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                     hWnd: self.window,
-                    hIcon: self.icon_for_form_factor(cand.1.form_factor),
+                    hIcon: self.icon_for_form_factor(cand.1.form_factor)?,
                     guidItem: NOTIFY_ICON_GUID,
                     // Both NIF_TIP & NIF_SHOWTIP are required to actually show the tooltip.
                     uFlags: NIF_ICON | NIF_MESSAGE | NIF_GUID | NIF_TIP | NIF_SHOWTIP,
@@ -652,15 +681,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             .find(|d| d.id == current_device_id)
             .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
         let tooltip = current_device.friendly_name.clone();
-        let icon = load_icon("audio_icon")?;
         let me = AudioSwitch {
             window,
-            icon,
+            icon: AdaptiveIcon::new("audio_icon", "audio_icon")?,
             popup_menu: create_popup_menu(&devices, current_device)?,
             available_devices: devices,
-            headphones_icon: load_icon("headphones_icon")?,
-            headset_icon: load_icon("headset_icon")?,
-            speaker_icon: load_icon("speaker_icon")?,
+            headphones_icon: AdaptiveIcon::new("headphones_icon", "headphones_icon_dark")?,
+            headset_icon: AdaptiveIcon::new("headset_icon", "headset_icon_dark")?,
+            speaker_icon: AdaptiveIcon::new("speaker_icon", "speaker_icon_dark")?,
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
