@@ -12,14 +12,17 @@ use std::path::PathBuf;
 use windows::core::PCWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Media::Audio::{eConsole, ERole, IMMDeviceEnumerator, MMDeviceEnumerator};
+use windows::Win32::Media::Audio::{
+    eConsole, ERole, EndpointFormFactor, IMMDeviceEnumerator, MMDeviceEnumerator,
+    PKEY_AudioEndpoint_FormFactor,
+};
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
     STGM_READ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Variant::VT_LPWSTR;
+use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
 use windows::Win32::UI::Shell::{
     FOLDERID_RoamingAppData, SHGetKnownFolderPath, Shell_NotifyIconW, KNOWN_FOLDER_FLAG, NIF_GUID,
     NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
@@ -438,6 +441,24 @@ fn get_available_audio_devices() -> Result<Vec<AudioDevice>, Box<dyn Error>> {
                 friendly_name: propvariant_to_string(&friendly_name)?,
                 selectable: true,
             });
+
+            let format = props.GetValue(&PKEY_AudioEndpoint_FormFactor)?;
+            let form_factor: EndpointFormFactor = match format.vt() {
+                VT_UI4 => EndpointFormFactor(format.Anonymous.Anonymous.Anonymous.ulVal as i32),
+                _ => {
+                    bail!(
+                        "Unsupported PROPVARIANT type for form factor: {:?}",
+                        format.vt()
+                    );
+                }
+            };
+            debug!(
+                "device: {:?}, id: {:?}, form factor: {:?} / {:?}",
+                devices.last().unwrap().friendly_name,
+                devices.last().unwrap().id,
+                format,
+                form_factor,
+            );
         }
     }
     Ok(devices)
@@ -530,10 +551,18 @@ fn apply_device_selectable_state(
     }
 }
 
+fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
+    let theme_key = windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")?;
+    let light_theme = theme_key.get_u32("AppsUseLightTheme")? == 1;
+    Ok(!light_theme)
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     info!("Audio Switch Tool");
     unsafe {
+        debug!("Dark mode: {}", is_dark_mode()?);
         CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
         defer!({
             CoUninitialize();
