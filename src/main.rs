@@ -13,8 +13,8 @@ use windows::core::PCWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{
-    eConsole, ERole, EndpointFormFactor, IMMDeviceEnumerator, MMDeviceEnumerator,
-    PKEY_AudioEndpoint_FormFactor,
+    eConsole, ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator,
+    MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor, Speakers,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
@@ -100,6 +100,8 @@ struct AudioDevice {
     friendly_name: String,
     // Whether this device will be included in the rotation.
     selectable: bool,
+    #[serde(skip)]
+    form_factor: EndpointFormFactor,
 }
 
 #[derive(Debug)]
@@ -108,6 +110,10 @@ struct AudioSwitch {
     icon: HICON,
     popup_menu: HMENU,
     available_devices: Vec<AudioDevice>,
+
+    headphones_icon: HICON,
+    headset_icon: HICON,
+    speaker_icon: HICON,
 }
 
 impl Drop for AudioSwitch {
@@ -119,6 +125,26 @@ impl Drop for AudioSwitch {
 }
 
 impl AudioSwitch {
+    #![allow(non_upper_case_globals)]
+    fn icon_for_form_factor(&self, form_factor: EndpointFormFactor) -> HICON {
+        match form_factor {
+            Headphones => self.headphones_icon,
+            Headset => self.headset_icon,
+            Speakers => self.speaker_icon,
+            _ => self.icon, // Default icon for other form factors
+        }
+    }
+
+    fn current_icon(&self) -> Result<HICON, Box<dyn Error>> {
+        let current_device_id = get_current_default_endpoint(eConsole)?;
+        let current_device = self
+            .available_devices
+            .iter()
+            .find(|d| d.id == current_device_id)
+            .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
+        Ok(self.icon_for_form_factor(current_device.form_factor))
+    }
+
     fn show_popup_menu(&self, x: i32, y: i32) -> Result<(), Box<dyn Error>> {
         debug!("Showing popup menu at ({x}, {y})");
         unsafe {
@@ -254,7 +280,7 @@ impl AudioSwitch {
                 &NOTIFYICONDATAW {
                     cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                     hWnd: self.window,
-                    hIcon: self.icon,
+                    hIcon: self.icon_for_form_factor(cand.1.form_factor),
                     guidItem: NOTIFY_ICON_GUID,
                     // Both NIF_TIP & NIF_SHOWTIP are required to actually show the tooltip.
                     uFlags: NIF_ICON | NIF_MESSAGE | NIF_GUID | NIF_TIP | NIF_SHOWTIP,
@@ -436,29 +462,24 @@ fn get_available_audio_devices() -> Result<Vec<AudioDevice>, Box<dyn Error>> {
             let device_id_str = device_id.to_string()?;
             let props = endpoint.OpenPropertyStore(STGM_READ)?;
             let friendly_name = props.GetValue(&PKEY_Device_FriendlyName)?;
+            let form_factor_var = props.GetValue(&PKEY_AudioEndpoint_FormFactor)?;
+            let form_factor: EndpointFormFactor = match form_factor_var.vt() {
+                VT_UI4 => {
+                    EndpointFormFactor(form_factor_var.Anonymous.Anonymous.Anonymous.ulVal as i32)
+                }
+                _ => {
+                    bail!(
+                        "Unsupported PROPVARIANT type for form factor: {:?}",
+                        form_factor_var,
+                    );
+                }
+            };
             devices.push(AudioDevice {
                 id: device_id_str,
                 friendly_name: propvariant_to_string(&friendly_name)?,
                 selectable: true,
-            });
-
-            let format = props.GetValue(&PKEY_AudioEndpoint_FormFactor)?;
-            let form_factor: EndpointFormFactor = match format.vt() {
-                VT_UI4 => EndpointFormFactor(format.Anonymous.Anonymous.Anonymous.ulVal as i32),
-                _ => {
-                    bail!(
-                        "Unsupported PROPVARIANT type for form factor: {:?}",
-                        format.vt()
-                    );
-                }
-            };
-            debug!(
-                "device: {:?}, id: {:?}, form factor: {:?} / {:?}",
-                devices.last().unwrap().friendly_name,
-                devices.last().unwrap().id,
-                format,
                 form_factor,
-            );
+            });
         }
     }
     Ok(devices)
@@ -558,6 +579,18 @@ fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
     Ok(!light_theme)
 }
 
+unsafe fn load_icon(icon_name: &str) -> Result<HICON, Box<dyn Error>> {
+    unsafe {
+        let module = GetModuleHandleW(None)?;
+        let icon_name_wide: Vec<u16> = icon_name.encode_utf16().chain(Some(0)).collect();
+        let icon = LoadIconW(Some(module.into()), PCWSTR(icon_name_wide.as_ptr()))?;
+        if icon.is_invalid() {
+            bail!("Failed to load icon: {}", icon_name);
+        }
+        Ok(icon)
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     info!("Audio Switch Tool");
@@ -619,23 +652,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             .find(|d| d.id == current_device_id)
             .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
         let tooltip = current_device.friendly_name.clone();
-        let icon_name = "audio_icon"
-            .encode_utf16()
-            .chain(Some(0))
-            .collect::<Vec<u16>>();
-        let icon = LoadIconW(Some(module.into()), PCWSTR(icon_name.as_ptr()))?;
+        let icon = load_icon("audio_icon")?;
         let me = AudioSwitch {
             window,
             icon,
             popup_menu: create_popup_menu(&devices, current_device)?,
             available_devices: devices,
+            headphones_icon: load_icon("headphones_icon")?,
+            headset_icon: load_icon("headset_icon")?,
+            speaker_icon: load_icon("speaker_icon")?,
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
         let notify_icon_data = &mut NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: window,
-            hIcon: icon,
+            hIcon: me.current_icon()?,
             guidItem: NOTIFY_ICON_GUID,
             // Both NIF_TIP & NIF_SHOWTIP are required to actually show the tooltip.
             uFlags: NIF_ICON | NIF_MESSAGE | NIF_GUID | NIF_TIP | NIF_SHOWTIP,
