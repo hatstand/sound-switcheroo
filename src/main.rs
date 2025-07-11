@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-use windows::core::PCWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{
@@ -37,10 +36,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
     WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
-use windows_core::{BOOL, GUID, PWSTR};
+use windows_core::{BOOL, GUID};
+use windows_strings::{w, PCWSTR};
 
 mod policy_config;
+mod safe_strings;
+
 use policy_config::IPolicyConfig;
+use safe_strings::with_wide_str;
 
 const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
 
@@ -48,19 +51,13 @@ const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9
 fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
     unsafe {
         debug!("Attempting to set default endpoint for device: {device_id}, role: {role:?}",);
-
-        // Create the PolicyConfig instance as IUnknown first
         let policy_config: IPolicyConfig =
             CoCreateInstance(&policy_config::CLSID_POLICY_CONFIG, None, CLSCTX_ALL)?;
 
-        // Convert device_id to wide string
-        let wide_device_id = device_id
-            .encode_utf16()
-            .chain(Some(0))
-            .collect::<Vec<u16>>();
-        let pcwstr_device_id = PCWSTR::from_raw(wide_device_id.as_ptr());
-
-        policy_config.SetDefaultEndpoint(pcwstr_device_id, role)?;
+        // Use safe scoped approach for string conversion
+        with_wide_str(device_id, |wide_device_id| {
+            policy_config.SetDefaultEndpoint(wide_device_id, role)
+        })?;
         Ok(())
     }
 }
@@ -183,22 +180,23 @@ impl AudioSwitch {
                 .iter()
                 .find(|d| d.id == current_device_id)
                 .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
-            let mut current_name = current_device
-                .friendly_name
-                .encode_utf16()
-                .chain(Some(0))
-                .collect::<Vec<u16>>();
 
-            let mut mii = MENUITEMINFOW {
-                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_STATE,
-                ..Default::default()
-            };
-            GetMenuItemInfoW(self.popup_menu, POPUP_CURRENT_DEVICE_ID, false, &mut mii)?;
-            mii.fMask = MIIM_STRING;
-            mii.dwTypeData = PWSTR(current_name.as_mut_ptr());
-            mii.dwItemData = current_device.friendly_name.chars().count();
-            SetMenuItemInfoW(self.popup_menu, POPUP_CURRENT_DEVICE_ID, false, &mii)?;
+            safe_strings::with_wide_str_mut(
+                &current_device.friendly_name,
+                |current_name| -> Result<(), Box<dyn Error>> {
+                    let mut mii = MENUITEMINFOW {
+                        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                        fMask: MIIM_STATE,
+                        ..Default::default()
+                    };
+                    GetMenuItemInfoW(self.popup_menu, POPUP_CURRENT_DEVICE_ID, false, &mut mii)?;
+                    mii.fMask = MIIM_STRING;
+                    mii.dwTypeData = current_name;
+                    mii.dwItemData = current_device.friendly_name.chars().count();
+                    SetMenuItemInfoW(self.popup_menu, POPUP_CURRENT_DEVICE_ID, false, &mii)?;
+                    Ok(())
+                },
+            )?;
 
             // Required to ensure the popup menu disappears again when a user clicks elsewhere.
             SetForegroundWindow(self.window).ok()?;
@@ -342,21 +340,23 @@ unsafe fn create_popup_menu(
     unsafe {
         let menu = CreatePopupMenu()?;
         // Add a menu item to exit the application.
-        let mut exit_name = "Exit".encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
-        InsertMenuItemW(
-            menu,
-            0,
-            true,
-            &MENUITEMINFOW {
-                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
-                fType: MFT_STRING,
-                dwTypeData: PWSTR(exit_name.as_mut_ptr()),
-                cch: exit_name.len() as u32 - 1,
-                wID: POPUP_EXIT_ID,
-                ..Default::default()
-            },
-        )?;
+        safe_strings::with_wide_str_mut("Exit", |exit_name| -> Result<(), Box<dyn Error>> {
+            InsertMenuItemW(
+                menu,
+                0,
+                true,
+                &MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
+                    fType: MFT_STRING,
+                    dwTypeData: exit_name,
+                    cch: exit_name.len() as u32 - 1,
+                    wID: POPUP_EXIT_ID,
+                    ..Default::default()
+                },
+            )?;
+            Ok(())
+        })?;
         // Add a separator.
         InsertMenuItemW(
             menu,
@@ -376,28 +376,30 @@ unsafe fn create_popup_menu(
                 device.friendly_name,
                 device_id_to_menu_id(&device.id)
             );
-            let mut device_name = device
-                .friendly_name
-                .encode_utf16()
-                .chain(Some(0))
-                .collect::<Vec<u16>>();
-            InsertMenuItemW(
-                menu,
-                0,
-                true,
-                &MENUITEMINFOW {
-                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                    fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_STATE,
-                    fType: MFT_STRING,
-                    fState: if device.selectable {
-                        windows::Win32::UI::WindowsAndMessaging::MFS_CHECKED
-                    } else {
-                        windows::Win32::UI::WindowsAndMessaging::MFS_UNCHECKED
-                    },
-                    dwTypeData: PWSTR(device_name.as_mut_ptr()),
-                    cch: device_name.len() as u32 - 1,
-                    wID: device_id_to_menu_id(&device.id),
-                    ..Default::default()
+            safe_strings::with_wide_str_mut(
+                &device.friendly_name,
+                |device_name| -> Result<(), Box<dyn Error>> {
+                    // Insert the device into the popup menu.
+                    InsertMenuItemW(
+                        menu,
+                        0,
+                        true,
+                        &MENUITEMINFOW {
+                            cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                            fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_STATE,
+                            fType: MFT_STRING,
+                            fState: if device.selectable {
+                                windows::Win32::UI::WindowsAndMessaging::MFS_CHECKED
+                            } else {
+                                windows::Win32::UI::WindowsAndMessaging::MFS_UNCHECKED
+                            },
+                            dwTypeData: device_name,
+                            cch: device_name.len() as u32 - 1,
+                            wID: device_id_to_menu_id(&device.id),
+                            ..Default::default()
+                        },
+                    )?;
+                    Ok(())
                 },
             )?;
         }
@@ -414,46 +416,49 @@ unsafe fn create_popup_menu(
             },
         )?;
         // Add an item for the current device.
-        let mut current_name = current_device
-            .friendly_name
-            .encode_utf16()
-            .chain(Some(0))
-            .collect::<Vec<u16>>();
-        InsertMenuItemW(
-            menu,
-            0,
-            true,
-            &MENUITEMINFOW {
-                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING | MIIM_ID,
-                fType: MFT_STRING,
-                dwTypeData: PWSTR(current_name.as_mut_ptr()),
-                cch: current_device.friendly_name.chars().count() as u32,
-                fState: MFS_DISABLED,
-                wID: POPUP_CURRENT_DEVICE_ID,
-                ..Default::default()
+        safe_strings::with_wide_str_mut(
+            &current_device.friendly_name,
+            |current_name| -> Result<(), Box<dyn Error>> {
+                // Insert the current device into the popup menu.
+                InsertMenuItemW(
+                    menu,
+                    0,
+                    true,
+                    &MENUITEMINFOW {
+                        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                        fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING | MIIM_ID,
+                        fType: MFT_STRING,
+                        dwTypeData: current_name,
+                        cch: current_name.len() as u32 - 1,
+                        fState: MFS_DISABLED,
+                        wID: POPUP_CURRENT_DEVICE_ID,
+                        ..Default::default()
+                    },
+                )?;
+                Ok(())
             },
         )?;
         // Add a nice name to the top of the menu.
-        let mut title_name = "AudioSwitch"
-            .encode_utf16()
-            .chain(Some(0))
-            .collect::<Vec<u16>>();
-        InsertMenuItemW(
-            menu,
-            0,
-            true,
-            &MENUITEMINFOW {
-                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING,
-                fType: MFT_STRING,
-                dwTypeData: PWSTR(title_name.as_mut_ptr()),
-                cch: title_name.len() as u32 - 1,
-                fState: MFS_DISABLED,
-                ..Default::default()
+        safe_strings::with_wide_str_mut(
+            "AudioSwitch",
+            |title_name| -> Result<(), Box<dyn Error>> {
+                InsertMenuItemW(
+                    menu,
+                    0,
+                    true,
+                    &MENUITEMINFOW {
+                        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                        fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING,
+                        fType: MFT_STRING,
+                        dwTypeData: title_name,
+                        cch: title_name.len() as u32 - 1,
+                        fState: MFS_DISABLED,
+                        ..Default::default()
+                    },
+                )?;
+                Ok(())
             },
         )?;
-
         Ok(menu)
     }
 }
@@ -607,8 +612,9 @@ fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
 unsafe fn load_icon(icon_name: &str) -> Result<HICON, Box<dyn Error>> {
     unsafe {
         let module = GetModuleHandleW(None)?;
-        let icon_name_wide: Vec<u16> = icon_name.encode_utf16().chain(Some(0)).collect();
-        let icon = LoadIconW(Some(module.into()), PCWSTR(icon_name_wide.as_ptr()))?;
+        let icon = with_wide_str(icon_name, |wide_icon_name| {
+            LoadIconW(Some(module.into()), wide_icon_name)
+        })?;
         if icon.is_invalid() {
             bail!("Failed to load icon: {}", icon_name);
         }
@@ -626,32 +632,25 @@ fn main() -> Result<(), Box<dyn Error>> {
             CoUninitialize();
         });
         let module = GetModuleHandleW(None)?;
-        let class_name = "AudioSwitchTool"
-            .encode_utf16()
-            .chain(Some(0))
-            .collect::<Vec<u16>>();
         // Register a window class for the taskbar icon.
         let class = RegisterClassExW(&WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(window_callback),
             hInstance: module.into(),
-            lpszClassName: PCWSTR(class_name.as_ptr()),
+            lpszClassName: w!("AudioSwitchTool"),
             ..Default::default()
         });
         defer!({
-            // Unregister the class when done.
-            let _ = UnregisterClassW(PCWSTR(class_name.as_ptr()), Some(module.into()));
+            // Unregister the class when done using its atom.
+            let _ = UnregisterClassW(PCWSTR(class as *const u16), Some(module.into()));
         });
 
         // Seems this needs to _not_ be a message-only window for ShellExecute to work.
-        let window_name = "Audio Switch Tool"
-            .encode_utf16()
-            .chain(Some(0))
-            .collect::<Vec<u16>>();
         let window = CreateWindowExW(
             WINDOW_EX_STYLE(0),
+            // Not really a string but the class atom.
             PCWSTR(class as *const u16),
-            PCWSTR(window_name.as_ptr()),
+            w!("Audio Switch Tool"),
             WINDOW_STYLE(0),
             0,
             0,

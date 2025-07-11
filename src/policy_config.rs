@@ -2,12 +2,13 @@
 #![allow(non_camel_case_types)]
 
 use std::ffi::c_void;
-use windows::core::{Interface, HRESULT, PCWSTR};
+use windows::core::{Interface, HRESULT};
 use windows::Devices::Custom::DeviceSharingMode;
 use windows::Win32::Foundation::PROPERTYKEY;
 use windows::Win32::Media::Audio::{ERole, WAVEFORMATEX};
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows_core::{BOOL, GUID};
+use windows_strings::PCWSTR;
 
 // See https://github.com/Belphemur/AudioEndPointLibrary/blob/master/DefSound/PolicyConfig.h
 
