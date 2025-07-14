@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
+use std::ptr::null_mut;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{
@@ -23,9 +24,10 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
 use windows::Win32::UI::Shell::{
-    FOLDERID_RoamingAppData, SHGetKnownFolderPath, Shell_NotifyIconW, KNOWN_FOLDER_FLAG, NIF_GUID,
-    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
-    NIN_SELECT, NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION_4,
+    FOLDERID_RoamingAppData, SHGetKnownFolderPath, ShellExecuteW, Shell_NotifyIconW,
+    KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFYICONDATAW, NOTIFYICONDATAW_0,
+    NOTIFYICON_VERSION_4,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GetCursorPos,
@@ -33,8 +35,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostQuitMessage, RegisterClassExW, SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW,
     TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON, HMENU, MENUITEMINFOW, MFS_CHECKED,
     MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
-    WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
+    SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
 use windows_strings::{w, PCWSTR};
@@ -226,6 +228,16 @@ impl AudioSwitch {
                         LPARAM::default(),
                     )?;
                 }
+                POPUP_ABOUT_ID => {
+                    ShellExecuteW(
+                        None,
+                        PCWSTR(null_mut()),
+                        w!("https://github.com/hatstand/fuzzy-giggle"),
+                        PCWSTR(null_mut()),
+                        PCWSTR(null_mut()),
+                        SW_SHOWNORMAL,
+                    );
+                }
                 // Device checked / unchecked in the popup menu.
                 device_menu_id => {
                     let device = self
@@ -326,6 +338,7 @@ impl AudioSwitch {
 // Technically, these could collide but it's unlikely.
 const POPUP_EXIT_ID: u32 = 1;
 const POPUP_CURRENT_DEVICE_ID: u32 = 2;
+const POPUP_ABOUT_ID: u32 = 3;
 
 // Converts a device ID to a unique deterministic 16-bit ID for use in the popup menu.
 // This must only use the low 16 bits as it is received via `LOWORD` in the WM_COMMAND callback.
@@ -438,6 +451,36 @@ unsafe fn create_popup_menu(
                 Ok(())
             },
         )?;
+        // Add a separator.
+        InsertMenuItemW(
+            menu,
+            0,
+            true,
+            &MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE,
+                fType: MFT_SEPARATOR,
+                ..Default::default()
+            },
+        )?;
+        // Add a menu item for the about dialog.
+        safe_strings::with_wide_str_mut("About", |about_name| -> Result<(), Box<dyn Error>> {
+            InsertMenuItemW(
+                menu,
+                0,
+                true,
+                &MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
+                    fType: MFT_STRING,
+                    dwTypeData: about_name,
+                    cch: about_name.len() as u32 - 1,
+                    wID: POPUP_ABOUT_ID,
+                    ..Default::default()
+                },
+            )?;
+            Ok(())
+        })?;
         // Add a nice name to the top of the menu.
         safe_strings::with_wide_str_mut(
             "AudioSwitch",
