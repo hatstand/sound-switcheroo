@@ -232,7 +232,7 @@ impl AudioSwitch {
                     ShellExecuteW(
                         None,
                         PCWSTR(null_mut()),
-                        w!("https://github.com/hatstand/fuzzy-giggle"),
+                        w!("https://github.com/hatstand/sound-switcheroo"),
                         PCWSTR(null_mut()),
                         PCWSTR(null_mut()),
                         SW_SHOWNORMAL,
@@ -483,7 +483,7 @@ unsafe fn create_popup_menu(
         })?;
         // Add a nice name to the top of the menu.
         safe_strings::with_wide_str_mut(
-            "AudioSwitch",
+            "Sound Switcheroo",
             |title_name| -> Result<(), Box<dyn Error>> {
                 InsertMenuItemW(
                     menu,
@@ -578,7 +578,7 @@ fn get_roaming_appdata_path() -> Result<PathBuf, Box<dyn Error>> {
 fn get_config_file_path() -> Result<PathBuf, Box<dyn Error>> {
     let mut path = get_roaming_appdata_path()?;
     path.push("PurpleHatstands");
-    path.push("AudioSwitch");
+    path.push("SoundSwitcheroo");
 
     // Create the directory if it doesn't exist
     if !path.exists() {
@@ -680,7 +680,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(window_callback),
             hInstance: module.into(),
-            lpszClassName: w!("AudioSwitchTool"),
+            lpszClassName: w!("SoundSwitcheroo"),
             ..Default::default()
         });
         defer!({

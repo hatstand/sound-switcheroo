@@ -62,24 +62,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "audioswitch"
-version = "0.1.0"
-dependencies = [
- "crc16",
- "defer",
- "embed-resource",
- "env_logger",
- "log",
- "serde",
- "serde_json",
- "simple-error",
- "windows",
- "windows-core",
- "windows-registry",
- "windows-strings",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -366,6 +348,24 @@ name = "simple-error"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e2accd2c41a0e920d2abd91b2badcfa1da784662f54fbc47e0e3a51f1e2e1cf"
+
+[[package]]
+name = "sound-switcheroo"
+version = "0.1.0"
+dependencies = [
+ "crc16",
+ "defer",
+ "embed-resource",
+ "env_logger",
+ "log",
+ "serde",
+ "serde_json",
+ "simple-error",
+ "windows",
+ "windows-core",
+ "windows-registry",
+ "windows-strings",
+]
 
 [[package]]
 name = "syn"

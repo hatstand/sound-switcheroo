@@ -42,11 +42,11 @@ jobs:
         VERSION: ${{ steps.calendar-version.outputs.version }}
       run: |
         set -x
-        echo "audioswitch_path=audioswitch-${VERSION}.exe" >> "$GITHUB_OUTPUT"
+        echo "audioswitch_path=sound-switcheroo-${VERSION}.exe" >> "$GITHUB_OUTPUT"
     - name: Version binary
       env:
         FINAL_PATH: ${{ steps.binary-version-path.outputs.audioswitch_path}}
-      run: cp target/x86_64-pc-windows-gnu/release/audioswitch.exe $FINAL_PATH
+      run: cp target/x86_64-pc-windows-gnu/release/sound-switcheroo.exe $FINAL_PATH
     - name: Generate artifact attestation
       uses: actions/attest-build-provenance@v2
       with:
@@ -58,7 +58,7 @@ jobs:
       with:
         name: ${{ steps.calendar-version.outputs.version }}
         tag_name: ${{ steps.calendar-version.outputs.version }}
-        files: "audioswitch-*.exe"
+        files: "sound-switcheroo-*.exe"
         fail_on_unmatched_files: true
         draft: false
         prerelease: false

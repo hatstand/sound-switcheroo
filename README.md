@@ -1,4 +1,4 @@
-# AudioSwitch Tool
+# Sound Switcheroo
 
 Allows quick switching between output audio devices on Windows, including only the devices you actually care about.
 
