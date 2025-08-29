@@ -36,6 +36,10 @@ jobs:
       env:
         VERSION: ${{ steps.calendar-version.outputs.version }}
       run: cargo build --verbose --target x86_64-pc-windows-gnu -r
+    - name: Build installer
+      env:
+        VERSION: ${{ steps.calendar-version.outputs.version }}
+      run: makensis -NOCD -DVERSION=${VERSION} dist/installer.nsis
     - name: Binary version path
       id: binary-version-path
       env:
@@ -47,11 +51,15 @@ jobs:
       env:
         FINAL_PATH: ${{ steps.binary-version-path.outputs.audioswitch_path}}
       run: cp target/x86_64-pc-windows-gnu/release/sound-switcheroo.exe $FINAL_PATH
+    - name: Version installer
+      env:
+        VERSION: ${{ steps.calendar-version.outputs.version }}
+      run: cp sound-switcheroo-installer.exe sound-switcheroo-installer-${VERSION}.exe
     - name: Generate artifact attestation
       uses: actions/attest-build-provenance@v2
       with:
         subject-path: ${{ steps.binary-version-path.outputs.audioswitch_path }}
-    - name: Create draft pre-release
+    - name: Create release
       uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

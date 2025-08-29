@@ -17,7 +17,7 @@
 !insertmacro MUI_LANGUAGE "English"
 
 Name "Sound Switcheroo ${VERSION}"
-OutFile "sound_switcheroo_installer.exe"
+OutFile "sound-switcheroo-installer.exe"
 InstallDir "$PROGRAMFILES\Sound Switcheroo"
 
 ShowInstDetails show
