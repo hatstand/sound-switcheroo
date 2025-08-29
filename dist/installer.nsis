@@ -1,0 +1,39 @@
+!include "MUI2.nsh"
+
+; Run Sound Switcheroo by default after installing.
+!define MUI_FINISHPAGE_RUN "$INSTDIR/sound-switcheroo.exe"
+
+; Installer pages
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+
+; Uninstaller pages
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES  
+!insertmacro MUI_UNPAGE_FINISH
+
+!insertmacro MUI_LANGUAGE "English"
+
+Name "Sound Switcheroo ${VERSION}"
+OutFile "sound_switcheroo_installer.exe"
+InstallDir "$PROGRAMFILES\Sound Switcheroo"
+
+ShowInstDetails show
+ShowUnInstDetails show
+
+Section
+    SetOutPath "$INSTDIR"
+    File /oname=sound-switcheroo.exe "target/x86_64-pc-windows-gnu/release/sound-switcheroo.exe"
+
+    CreateShortcut "$SMSTARTUP\sound-switcheroo.lnk" "$INSTDIR\sound-switcheroo.exe"
+    WriteUninstaller "$INSTDIR\Uninstall.exe"
+SectionEnd
+
+Section "Uninstall"
+    Delete $INSTDIR\sound-switcheroo.exe
+    Delete $SMSTARTUP\sound-switcheroo.lnk
+    Delete $INSTDIR\Uninstall.exe
+    RMDir $INSTDIR
+SectionEnd
