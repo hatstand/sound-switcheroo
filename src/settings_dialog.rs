@@ -40,6 +40,11 @@ pub enum DialogResult {
     Cancelled,
 }
 
+// Dialog result codes returned by EndDialog and DialogBoxParamW
+// Note: 0 indicates an error from DialogBoxParamW, so we use non-zero values
+const DIALOG_RESULT_OK: isize = 1;
+const DIALOG_RESULT_CANCEL: isize = 2;
+
 pub struct SettingsDialog {
     pub devices: Vec<AudioDevice>,
     pub hotkey_vk: u8,
@@ -350,12 +355,12 @@ unsafe extern "system" fn settings_dialog_proc(
                                 (state & LVIS_CHECKED) != 0;
                         }
 
-                        EndDialog(hwnd, 1).expect("EndDialog error");
+                        EndDialog(hwnd, DIALOG_RESULT_OK).expect("EndDialog error");
                         1
                     }
                     2 => {
                         // IDCANCEL
-                        EndDialog(hwnd, 0).expect("EndDialog failed IDCANCEL");
+                        EndDialog(hwnd, DIALOG_RESULT_CANCEL).expect("EndDialog failed IDCANCEL");
                         1
                     }
                     _ => 0,
@@ -409,7 +414,7 @@ pub fn show_settings_dialog(
         // Clear dialog handle after dialog closes
         *dialog_hwnd_arc.borrow_mut() = None;
 
-        if result == 1 {
+        if result == DIALOG_RESULT_OK {
             *devices = settings.devices;
             *hotkey_vk = settings.hotkey_vk;
             *hotkey_mods = settings.hotkey_mods;
