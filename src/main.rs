@@ -46,7 +46,7 @@ use audio_device::{
     get_available_audio_devices, get_current_default_endpoint, get_device_friendly_name,
     set_default_endpoint,
 };
-use config::{AudioDevice, apply_device_selectable_state, load_config, save_config};
+use config::{AudioDevice, apply_device_selectable_state, is_first_run, load_config, save_config};
 use icon::{AdaptiveIcon, is_dark_mode};
 use notification_client::CustomImmNotificationClient;
 use settings_dialog::{DialogResult, show_settings_dialog};
@@ -429,7 +429,7 @@ fn main() -> Result<()> {
             &notification_client,
         )?;
 
-        let me = AudioSwitch {
+        let mut me = AudioSwitch {
             window,
             icon: AdaptiveIcon::new("switcheroo_icon", "switcheroo_dark_icon")?,
             available_devices: devices,
@@ -474,6 +474,26 @@ fn main() -> Result<()> {
         });
         // Enable better callback API.
         Shell_NotifyIconW(NIM_SETVERSION, notify_icon_data).ok()?;
+
+        // Open settings dialog on first run
+        if is_first_run()? {
+            info!("First run detected, opening settings dialog");
+            let dialog_result = show_settings_dialog(
+                window,
+                &mut me.available_devices,
+                &mut me.hotkey_vk,
+                &mut me.hotkey_mods,
+                &me.notification_client,
+                &me.settings_dialog_hwnd,
+            );
+
+            // Save settings if dialog was accepted
+            if let Ok(DialogResult::Accepted) = dialog_result
+                && let Err(e) = save_config(&me.available_devices, me.hotkey_vk, me.hotkey_mods)
+            {
+                error!("Failed to save config: {e}");
+            }
+        }
 
         debug!("Registering global hotkey");
         let initial_mods = hotkeyf_to_mod(me.hotkey_mods);

@@ -107,6 +107,12 @@ pub fn save_config(devices: &[AudioDevice], hotkey_vk: u8, hotkey_mods: u8) -> R
     Ok(())
 }
 
+/// Returns true if this is the first run (config file doesn't exist)
+pub fn is_first_run() -> Result<bool> {
+    let config_path = get_config_file_path()?;
+    Ok(!config_path.exists())
+}
+
 /// Loads the config from the JSON file in the roaming AppData directory
 /// Uses default values for missing fields
 pub fn load_config() -> Result<AppConfig> {
