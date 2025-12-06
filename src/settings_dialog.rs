@@ -24,11 +24,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows_core::PCWSTR;
 
+use crate::audio_device::get_available_audio_devices;
+use crate::config::{AudioDevice, merge_device_states};
+use crate::icon::{AdaptiveIcon, is_dark_mode};
 use crate::safe_strings;
 use crate::{
-    AdaptiveIcon, AudioDevice, IDC_DEVICE_LIST, IDC_HOTKEY, IDD_SETTINGS, LVIS_CHECKED,
-    LVIS_UNCHECKED, WM_DEVICE_CHANGE, get_available_audio_devices, is_dark_mode,
-    merge_device_states,
+    IDC_DEVICE_LIST, IDC_HOTKEY, IDD_SETTINGS, LVIS_CHECKED, LVIS_UNCHECKED, WM_DEVICE_CHANGE,
 };
 
 pub struct SettingsDialog {

@@ -2,7 +2,6 @@
 
 use defer::defer;
 use log::{debug, error, info};
-use simple_error::bail;
 use std::cell::RefCell;
 use std::error::Error;
 use std::ptr::null_mut;
@@ -27,18 +26,19 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GWLP_USERDATA,
-    GetCursorPos, GetMessageW, GetWindowLongPtrW, HICON, HMENU, InsertMenuItemW, LoadIconW,
-    MENUITEMINFOW, MFS_DISABLED, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
-    PostMessageW, PostQuitMessage, RegisterClassExW, SW_SHOWNORMAL, SetForegroundWindow,
-    SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenuEx,
-    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY,
-    WM_HOTKEY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
+    GetCursorPos, GetMessageW, GetWindowLongPtrW, HICON, HMENU, InsertMenuItemW, MENUITEMINFOW,
+    MFS_DISABLED, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, PostMessageW,
+    PostQuitMessage, RegisterClassExW, SW_SHOWNORMAL, SetForegroundWindow, SetWindowLongPtrW,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_QUIT,
+    WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
 use windows_strings::{PCWSTR, w};
 
 mod audio_device;
 mod config;
+mod icon;
 mod notification_client;
 mod policy_config;
 mod safe_strings;
@@ -48,11 +48,9 @@ use audio_device::{
     get_available_audio_devices, get_current_default_endpoint, get_device_friendly_name,
     set_default_endpoint,
 };
-use config::{
-    AudioDevice, apply_device_selectable_state, load_config, merge_device_states, save_config,
-};
+use config::{AudioDevice, apply_device_selectable_state, load_config, save_config};
+use icon::{AdaptiveIcon, is_dark_mode};
 use notification_client::CustomImmNotificationClient;
-use safe_strings::with_wide_str;
 use settings_dialog::show_settings_dialog;
 
 const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
@@ -75,31 +73,6 @@ fn string_to_tip(s: &str) -> [u16; 128] {
     }
     ret[encoded.len()] = 0; // Null-terminate the string
     ret
-}
-
-#[derive(Debug)]
-struct AdaptiveIcon {
-    light: HICON,
-    dark: HICON,
-}
-
-impl AdaptiveIcon {
-    pub fn new(light_icon_name: &str, dark_icon_name: &str) -> Result<Self, Box<dyn Error>> {
-        let light_icon = unsafe { load_icon(light_icon_name)? };
-        let dark_icon = unsafe { load_icon(dark_icon_name)? };
-        Ok(Self {
-            light: light_icon,
-            dark: dark_icon,
-        })
-    }
-
-    pub fn icon(&self) -> Result<HICON, Box<dyn Error>> {
-        if is_dark_mode()? {
-            Ok(self.dark)
-        } else {
-            Ok(self.light)
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -384,26 +357,6 @@ unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
             },
         )?;
         Ok(menu)
-    }
-}
-
-fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
-    let theme_key = windows_registry::CURRENT_USER
-        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")?;
-    let light_theme = theme_key.get_u32("AppsUseLightTheme")? == 1;
-    Ok(!light_theme)
-}
-
-unsafe fn load_icon(icon_name: &str) -> Result<HICON, Box<dyn Error>> {
-    unsafe {
-        let module = GetModuleHandleW(None)?;
-        let icon = with_wide_str(icon_name, |wide_icon_name| {
-            LoadIconW(Some(module.into()), wide_icon_name)
-        })?;
-        if icon.is_invalid() {
-            bail!("Failed to load icon: {}", icon_name);
-        }
-        Ok(icon)
     }
 }
 
