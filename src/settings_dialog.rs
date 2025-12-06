@@ -25,6 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows_core::PCWSTR;
 
+use crate::LOWORD;
 use crate::audio_device::get_available_audio_devices;
 use crate::config::{AudioDevice, merge_device_states};
 use crate::icon::{AdaptiveIcon, is_dark_mode};
@@ -427,7 +428,7 @@ unsafe extern "system" fn settings_dialog_proc(
             // Command message sent when controls (buttons) are activated.
             // Handles OK (save settings) and Cancel (discard changes) buttons.
             WM_COMMAND => {
-                let cmd = (wparam.0 & 0xFFFF) as u32;
+                let cmd = LOWORD!(wparam.0) as u32;
                 match cmd {
                     // OK button clicked - save hotkey and device selections, close dialog.
                     // Returns 1 to indicate the command was processed.

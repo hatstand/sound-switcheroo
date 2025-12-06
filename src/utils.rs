@@ -31,8 +31,12 @@ pub fn string_to_tip(s: &str) -> [u16; 128] {
     ret
 }
 
-/// Helper function for extracting low word from a 32-bit value
+/// Helper macro for extracting low word from a value
+/// Works with both signed and unsigned integer types
 #[allow(non_snake_case)]
-pub fn LOWORD(l: isize) -> isize {
-    l & 0xffff
+#[macro_export]
+macro_rules! LOWORD {
+    ($l:expr) => {
+        $l & 0xffff
+    };
 }

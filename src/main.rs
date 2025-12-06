@@ -50,7 +50,7 @@ use config::{AudioDevice, apply_device_selectable_state, load_config, save_confi
 use icon::{AdaptiveIcon, is_dark_mode};
 use notification_client::CustomImmNotificationClient;
 use settings_dialog::{DialogResult, show_settings_dialog};
-use utils::{LOWORD, hotkeyf_to_mod, string_to_tip};
+use utils::{hotkeyf_to_mod, string_to_tip};
 
 const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
 const IDD_SETTINGS: u32 = 101;
@@ -532,7 +532,7 @@ unsafe extern "system" fn window_callback(
     unsafe {
         let raw_me = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AudioSwitch;
         match msg {
-            TASKBAR_CB_ID => match LOWORD(lparam.0) as u32 {
+            TASKBAR_CB_ID => match LOWORD!(lparam.0) as u32 {
                 // Right click on the taskbar icon.
                 WM_RBUTTONUP => {
                     let mut cursor_pos = POINT::default();
@@ -559,7 +559,7 @@ unsafe extern "system" fn window_callback(
             },
             // Item in popup menu selected.
             WM_COMMAND => {
-                let chosen = LOWORD(wparam.0 as isize) as u32;
+                let chosen = LOWORD!(wparam.0) as u32;
                 let _ = raw_me.as_mut().unwrap().menu_selection(chosen);
                 LRESULT(0)
             }
