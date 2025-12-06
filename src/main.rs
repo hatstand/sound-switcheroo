@@ -191,6 +191,37 @@ struct AudioDevice {
     form_factor: EndpointFormFactor,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct HotkeyConfig {
+    #[serde(default = "default_hotkey_vk")]
+    vk: u8,
+    #[serde(default = "default_hotkey_mods")]
+    mods: u8,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AppConfig {
+    #[serde(default = "default_hotkey_config")]
+    hotkey: HotkeyConfig,
+    #[serde(default)]
+    devices: HashMap<String, bool>,
+}
+
+fn default_hotkey_vk() -> u8 {
+    0x58 // 'X' key
+}
+
+fn default_hotkey_mods() -> u8 {
+    (HOTKEYF_SHIFT | HOTKEYF_CONTROL | HOTKEYF_ALT) as u8
+}
+
+fn default_hotkey_config() -> HotkeyConfig {
+    HotkeyConfig {
+        vk: default_hotkey_vk(),
+        mods: default_hotkey_mods(),
+    }
+}
+
 #[derive(Debug)]
 struct AudioSwitch {
     window: HWND,
@@ -312,8 +343,10 @@ impl AudioSwitch {
 
                     // Save settings if dialog was accepted
                     if let Ok(true) = dialog_result {
-                        if let Err(e) = save_device_selectable_state(&self.available_devices) {
-                            error!("Failed to save device selectable state: {e}");
+                        if let Err(e) =
+                            save_config(&self.available_devices, self.hotkey_vk, self.hotkey_mods)
+                        {
+                            error!("Failed to save config: {e}");
                         }
                     }
                 }
@@ -555,7 +588,11 @@ fn get_config_file_path() -> Result<PathBuf, Box<dyn Error>> {
 }
 
 /// Saves the selectable state of devices to a JSON file in the roaming AppData directory
-fn save_device_selectable_state(devices: &[AudioDevice]) -> Result<(), Box<dyn Error>> {
+fn save_config(
+    devices: &[AudioDevice],
+    hotkey_vk: u8,
+    hotkey_mods: u8,
+) -> Result<(), Box<dyn Error>> {
     let config_path = get_config_file_path()?;
 
     // Create a map of device_id -> selectable state
@@ -564,33 +601,46 @@ fn save_device_selectable_state(devices: &[AudioDevice]) -> Result<(), Box<dyn E
         .map(|device| (device.id.clone(), device.selectable))
         .collect();
 
-    let json_data = serde_json::to_string_pretty(&device_states)?;
+    let config = AppConfig {
+        hotkey: HotkeyConfig {
+            vk: hotkey_vk,
+            mods: hotkey_mods,
+        },
+        devices: device_states,
+    };
+
+    let json_data = serde_json::to_string_pretty(&config)?;
     fs::write(&config_path, json_data)?;
 
-    debug!(
-        "Saved device selectable state to: {}",
-        config_path.display()
-    );
+    debug!("Saved config to: {}", config_path.display());
     Ok(())
 }
 
-/// Loads the selectable state of devices from the JSON file in the roaming AppData directory
-fn load_device_selectable_state() -> Result<HashMap<String, bool>, Box<dyn Error>> {
+/// Loads the config from the JSON file in the roaming AppData directory
+/// Uses default values for missing fields
+fn load_config() -> Result<AppConfig, Box<dyn Error>> {
     let config_path = get_config_file_path()?;
 
     if !config_path.exists() {
-        debug!("Config file does not exist: {}", config_path.display());
-        return Ok(HashMap::new());
+        debug!("Config file does not exist, using defaults");
+        return Ok(AppConfig {
+            hotkey: default_hotkey_config(),
+            devices: HashMap::new(),
+        });
     }
 
     let json_data = fs::read_to_string(&config_path)?;
-    let device_states: HashMap<String, bool> = serde_json::from_str(&json_data)?;
+    // serde will use default values for any missing fields
+    let config: AppConfig = serde_json::from_str(&json_data).unwrap_or_else(|e| {
+        error!("Failed to parse config file: {e}, using defaults");
+        AppConfig {
+            hotkey: default_hotkey_config(),
+            devices: HashMap::new(),
+        }
+    });
 
-    debug!(
-        "Loaded device selectable state from: {}",
-        config_path.display()
-    );
-    Ok(device_states)
+    debug!("Loaded config from: {}", config_path.display());
+    Ok(config)
 }
 
 /// Applies the loaded selectable state to the current devices
@@ -927,9 +977,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             error!("Failed to create window: {:?} {:?}", err, GetLastError());
         })?;
         let mut devices = get_available_audio_devices()?;
-        // Load and apply device selectable state
-        let saved_states = load_device_selectable_state()?;
-        apply_device_selectable_state(&mut devices, &saved_states);
+        // Load config
+        let config = load_config()?;
+        apply_device_selectable_state(&mut devices, &config.devices);
         let current_device_id = get_current_default_endpoint(eConsole)?;
         let current_device = devices
             .iter()
@@ -944,9 +994,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             headphones_icon: AdaptiveIcon::new("headphones_icon", "headphones_icon_dark")?,
             headset_icon: AdaptiveIcon::new("headset_icon", "headset_icon_dark")?,
             speaker_icon: AdaptiveIcon::new("speaker_icon", "speaker_icon_dark")?,
-            // Default hotkey: Ctrl + Alt + Shift + X
-            hotkey_vk: 0x58, // 'X' key
-            hotkey_mods: (HOTKEYF_SHIFT | HOTKEYF_CONTROL | HOTKEYF_ALT) as u8,
+            hotkey_vk: config.hotkey.vk,
+            hotkey_mods: config.hotkey.mods,
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
@@ -1077,9 +1126,6 @@ unsafe extern "system" fn window_callback(
                 LRESULT(0)
             }
             WM_DESTROY => {
-                // Save the device selectable state on exit
-                let _ = save_device_selectable_state(&raw_me.as_ref().unwrap().available_devices);
-
                 PostQuitMessage(0);
                 LRESULT(0)
             }
