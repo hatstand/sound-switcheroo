@@ -2,13 +2,9 @@
 
 use defer::defer;
 use log::{debug, error, info};
-use serde::{Deserialize, Serialize};
 use simple_error::bail;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
-use std::path::PathBuf;
 use std::ptr::null_mut;
 use std::rc::Rc;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
@@ -29,9 +25,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOD_ALT, MOD_CONTROL, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
 };
 use windows::Win32::UI::Shell::{
-    FOLDERID_RoamingAppData, KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP,
-    NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4,
-    NOTIFYICONDATAW, NOTIFYICONDATAW_0, SHGetKnownFolderPath, Shell_NotifyIconW, ShellExecuteW,
+    NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+    NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0,
+    Shell_NotifyIconW, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GWLP_USERDATA,
@@ -45,11 +41,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_core::{BOOL, GUID};
 use windows_strings::{PCWSTR, w};
 
+mod config;
 mod notification_client;
 mod policy_config;
 mod safe_strings;
 mod settings_dialog;
 
+use config::{
+    AudioDevice, apply_device_selectable_state, load_config, merge_device_states, save_config,
+};
 use notification_client::CustomImmNotificationClient;
 use policy_config::IPolicyConfig;
 use safe_strings::with_wide_str;
@@ -145,47 +145,6 @@ impl AdaptiveIcon {
         } else {
             Ok(self.light)
         }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AudioDevice {
-    id: String,
-    friendly_name: String,
-    // Whether this device will be included in the rotation.
-    selectable: bool,
-    #[serde(skip)]
-    form_factor: EndpointFormFactor,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct HotkeyConfig {
-    #[serde(default = "default_hotkey_vk")]
-    vk: u8,
-    #[serde(default = "default_hotkey_mods")]
-    mods: u8,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct AppConfig {
-    #[serde(default = "default_hotkey_config")]
-    hotkey: HotkeyConfig,
-    #[serde(default)]
-    devices: HashMap<String, bool>,
-}
-
-fn default_hotkey_vk() -> u8 {
-    b'X'
-}
-
-fn default_hotkey_mods() -> u8 {
-    (HOTKEYF_SHIFT | HOTKEYF_CONTROL | HOTKEYF_ALT) as u8
-}
-
-fn default_hotkey_config() -> HotkeyConfig {
-    HotkeyConfig {
-        vk: default_hotkey_vk(),
-        mods: default_hotkey_mods(),
     }
 }
 
@@ -524,144 +483,6 @@ fn get_available_audio_devices() -> Result<Vec<AudioDevice>, Box<dyn Error>> {
         }
     }
     Ok(devices)
-}
-
-/// Gets the path to the user's roaming AppData directory
-fn get_roaming_appdata_path() -> Result<PathBuf, Box<dyn Error>> {
-    unsafe {
-        let path_ptr =
-            SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KNOWN_FOLDER_FLAG::default(), None)?;
-
-        let path_str = path_ptr.to_string()?;
-        let path = PathBuf::from(path_str);
-
-        // Free the memory allocated by SHGetKnownFolderPath
-        windows::Win32::System::Com::CoTaskMemFree(Some(path_ptr.as_ptr() as *const _));
-
-        Ok(path)
-    }
-}
-
-/// Gets the full path to the AudioSwitch configuration file
-fn get_config_file_path() -> Result<PathBuf, Box<dyn Error>> {
-    let mut path = get_roaming_appdata_path()?;
-    path.push("PurpleHatstands");
-    path.push("SoundSwitcheroo");
-
-    // Create the directory if it doesn't exist
-    if !path.exists() {
-        fs::create_dir_all(&path)?;
-    }
-
-    path.push("device_config.json");
-    debug!("Config file path: {}", path.display());
-    Ok(path)
-}
-
-/// Saves the selectable state of devices to a JSON file in the roaming AppData directory
-fn save_config(
-    devices: &[AudioDevice],
-    hotkey_vk: u8,
-    hotkey_mods: u8,
-) -> Result<(), Box<dyn Error>> {
-    let config_path = get_config_file_path()?;
-
-    // Create a map of device_id -> selectable state
-    let device_states: HashMap<String, bool> = devices
-        .iter()
-        .map(|device| (device.id.clone(), device.selectable))
-        .collect();
-
-    let config = AppConfig {
-        hotkey: HotkeyConfig {
-            vk: hotkey_vk,
-            mods: hotkey_mods,
-        },
-        devices: device_states,
-    };
-
-    let json_data = serde_json::to_string_pretty(&config)?;
-    fs::write(&config_path, json_data)?;
-
-    debug!("Saved config to: {}", config_path.display());
-    Ok(())
-}
-
-/// Loads the config from the JSON file in the roaming AppData directory
-/// Uses default values for missing fields
-fn load_config() -> Result<AppConfig, Box<dyn Error>> {
-    let config_path = get_config_file_path()?;
-
-    if !config_path.exists() {
-        debug!("Config file does not exist, using defaults");
-        return Ok(AppConfig {
-            hotkey: default_hotkey_config(),
-            devices: HashMap::new(),
-        });
-    }
-
-    let json_data = fs::read_to_string(&config_path)?;
-    // serde will use default values for any missing fields
-    let config: AppConfig = serde_json::from_str(&json_data).unwrap_or_else(|e| {
-        error!("Failed to parse config file: {e}, using defaults");
-        AppConfig {
-            hotkey: default_hotkey_config(),
-            devices: HashMap::new(),
-        }
-    });
-
-    debug!("Loaded config from: {}", config_path.display());
-    Ok(config)
-}
-
-/// Applies the loaded selectable state to the current devices
-fn apply_device_selectable_state(
-    devices: &mut [AudioDevice],
-    saved_states: &HashMap<String, bool>,
-) {
-    for device in devices.iter_mut() {
-        if let Some(&selectable) = saved_states.get(&device.id) {
-            device.selectable = selectable;
-            debug!(
-                "Applied selectable state for device {}: {}",
-                device.friendly_name, selectable
-            );
-        }
-    }
-}
-
-/// Merges runtime device list with saved device states
-/// Current devices get their selectable state from saved_devices
-/// Previously saved devices that are no longer plugged in are preserved in the list
-fn merge_device_states(current_devices: &mut Vec<AudioDevice>, saved_devices: &[AudioDevice]) {
-    // Build a map of saved device states
-    let saved_map: HashMap<String, bool> = saved_devices
-        .iter()
-        .map(|d| (d.id.clone(), d.selectable))
-        .collect();
-
-    // Apply saved states to current devices
-    for device in current_devices.iter_mut() {
-        if let Some(&selectable) = saved_map.get(&device.id) {
-            device.selectable = selectable;
-            debug!(
-                "Restored selectable state for device {}: {}",
-                device.friendly_name, selectable
-            );
-        }
-    }
-
-    // Add previously saved devices that are no longer available (unplugged)
-    // These devices will appear in settings but can't be selected as current device
-    for saved_device in saved_devices.iter() {
-        if !current_devices.iter().any(|d| d.id == saved_device.id) {
-            debug!(
-                "Preserving unplugged device in settings: {}",
-                saved_device.friendly_name
-            );
-            current_devices.push(saved_device.clone());
-        }
-    }
 }
 
 fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
