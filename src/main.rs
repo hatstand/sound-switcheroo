@@ -29,9 +29,10 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
 use windows::Win32::UI::Controls::{
-    InitCommonControlsEx, HKM_GETHOTKEY, HKM_SETHOTKEY, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES,
-    INITCOMMONCONTROLSEX, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_PARAM,
-    LVIF_TEXT, LVIS_STATEIMAGEMASK, LVITEMW, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW,
+    InitCommonControlsEx, HKM_GETHOTKEY, HKM_SETHOTKEY, HOTKEYF_ALT, HOTKEYF_CONTROL,
+    HOTKEYF_SHIFT, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX,
+    LIST_VIEW_ITEM_STATE_FLAGS, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_PARAM, LVIF_TEXT,
+    LVIS_STATEIMAGEMASK, LVITEMW, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW,
     LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMSTATE, LVS_EX_CHECKBOXES,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -280,34 +281,37 @@ impl AudioSwitch {
                     );
                 }
                 POPUP_SETTINGS_ID => {
-                    if let Ok(true) = show_settings_dialog(
+                    // Unregister hotkey before opening settings dialog
+                    // so the hotkey control can use the same key combination
+                    let _ = UnregisterHotKey(None, HOTKEY_ID);
+
+                    let dialog_result = show_settings_dialog(
                         self.window,
                         &mut self.available_devices,
                         &mut self.hotkey_vk,
                         &mut self.hotkey_mods,
-                    ) {
-                        // Unregister old hotkey
-                        let _ = UnregisterHotKey(None, HOTKEY_ID);
+                    );
 
-                        // Re-register hotkey with new values
-                        let mut mods =
-                            windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS(0);
-                        if self.hotkey_mods & 0x01 != 0 {
-                            mods |= MOD_ALT;
-                        }
-                        if self.hotkey_mods & 0x02 != 0 {
-                            mods |= MOD_CONTROL;
-                        }
-                        if self.hotkey_mods & 0x04 != 0 {
-                            mods |= MOD_SHIFT;
-                        }
+                    // Always re-register the hotkey after closing the dialog
+                    // Hotkey control uses: HOTKEYF_SHIFT, HOTKEYF_CONTROL, HOTKEYF_ALT
+                    let mut mods =
+                        windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS(0);
+                    if self.hotkey_mods & HOTKEYF_SHIFT as u8 != 0 {
+                        mods |= MOD_SHIFT;
+                    }
+                    if self.hotkey_mods & HOTKEYF_CONTROL as u8 != 0 {
+                        mods |= MOD_CONTROL;
+                    }
+                    if self.hotkey_mods & HOTKEYF_ALT as u8 != 0 {
+                        mods |= MOD_ALT;
+                    }
 
-                        if let Err(e) = RegisterHotKey(None, HOTKEY_ID, mods, self.hotkey_vk as u32)
-                        {
-                            error!("Failed to register new hotkey: {e}");
-                        }
+                    if let Err(e) = RegisterHotKey(None, HOTKEY_ID, mods, self.hotkey_vk as u32) {
+                        error!("Failed to register hotkey: {e}");
+                    }
 
-                        // Save settings
+                    // Save settings if dialog was accepted
+                    if let Ok(true) = dialog_result {
                         if let Err(e) = save_device_selectable_state(&self.available_devices) {
                             error!("Failed to save device selectable state: {e}");
                         }
@@ -940,8 +944,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             headphones_icon: AdaptiveIcon::new("headphones_icon", "headphones_icon_dark")?,
             headset_icon: AdaptiveIcon::new("headset_icon", "headset_icon_dark")?,
             speaker_icon: AdaptiveIcon::new("speaker_icon", "speaker_icon_dark")?,
-            hotkey_vk: 0x58,                 // 'X' key
-            hotkey_mods: 0x01 | 0x02 | 0x04, // ALT | CONTROL | SHIFT
+            // Default hotkey: Ctrl + Alt + Shift + X
+            hotkey_vk: 0x58, // 'X' key
+            hotkey_mods: (HOTKEYF_SHIFT | HOTKEYF_CONTROL | HOTKEYF_ALT) as u8,
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
