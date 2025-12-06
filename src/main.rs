@@ -1,6 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use crc16::State;
 use defer::defer;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -14,47 +13,48 @@ use windows::Win32;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::Media::Audio::{
-    ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator, IMMNotificationClient,
-    IMMNotificationClient_Impl, MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor, Speakers,
-    eConsole,
+    eConsole, ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator,
+    IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
+    PKEY_AudioEndpoint_FormFactor, Speakers,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
     STGM_READ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
 use windows::Win32::UI::Controls::{
-    HKM_GETHOTKEY, HKM_SETHOTKEY, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX,
-    InitCommonControlsEx, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_PARAM,
+    InitCommonControlsEx, HKM_GETHOTKEY, HKM_SETHOTKEY, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES,
+    INITCOMMONCONTROLSEX, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_PARAM,
     LVIF_TEXT, LVIS_STATEIMAGEMASK, LVITEMW, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW,
     LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMSTATE, LVS_EX_CHECKBOXES,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    MOD_ALT, MOD_CONTROL, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
+    RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
 };
 use windows::Win32::UI::Shell::{
-    FOLDERID_RoamingAppData, KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP,
-    NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4,
-    NOTIFYICONDATAW, NOTIFYICONDATAW_0, SHGetKnownFolderPath, Shell_NotifyIconW, ShellExecuteW,
+    FOLDERID_RoamingAppData, SHGetKnownFolderPath, ShellExecuteW, Shell_NotifyIconW,
+    KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFYICONDATAW, NOTIFYICONDATAW_0,
+    NOTIFYICON_VERSION_4,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DialogBoxParamW,
-    DispatchMessageW, EndDialog, GWLP_USERDATA, GetCursorPos, GetDlgItem, GetMenuItemInfoW,
-    GetMessageW, GetWindowLongPtrW, GetWindowRect, HICON, HMENU, InsertMenuItemW, LoadIconW,
-    MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID,
-    MIIM_STATE, MIIM_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassExW, SW_SHOWNORMAL,
-    SWP_NOSIZE, SWP_NOZORDER, SendDlgItemMessageW, SendMessageW, SetForegroundWindow,
-    SetMenuItemInfoW, SetWindowLongPtrW, SetWindowPos, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
-    WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_INITDIALOG, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
+    DispatchMessageW, EndDialog, GetCursorPos, GetDlgItem, GetMessageW, GetWindowLongPtrW,
+    GetWindowRect, InsertMenuItemW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
+    SendDlgItemMessageW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON, HMENU, MENUITEMINFOW, MFS_DISABLED,
+    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, SWP_NOSIZE, SWP_NOZORDER,
+    SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_INITDIALOG, WM_QUIT, WM_RBUTTONUP,
+    WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
-use windows_strings::{PCWSTR, w};
+use windows_strings::{w, PCWSTR};
 
 mod policy_config;
 mod safe_strings;
@@ -240,31 +240,6 @@ impl AudioSwitch {
     fn show_popup_menu(&self, x: i32, y: i32) -> Result<(), Box<dyn Error>> {
         debug!("Showing popup menu at ({x}, {y})");
         unsafe {
-            // Highlight the current device in the popup menu.
-            let current_device_id = get_current_default_endpoint(eConsole)?;
-            let current_device = self
-                .available_devices
-                .iter()
-                .find(|d| d.id == current_device_id)
-                .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
-
-            safe_strings::with_wide_str_mut(
-                &current_device.friendly_name,
-                |current_name| -> Result<(), Box<dyn Error>> {
-                    let mut mii = MENUITEMINFOW {
-                        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                        fMask: MIIM_STATE,
-                        ..Default::default()
-                    };
-                    GetMenuItemInfoW(self.popup_menu, POPUP_CURRENT_DEVICE_ID, false, &mut mii)?;
-                    mii.fMask = MIIM_STRING;
-                    mii.dwTypeData = current_name;
-                    mii.dwItemData = current_device.friendly_name.chars().count();
-                    SetMenuItemInfoW(self.popup_menu, POPUP_CURRENT_DEVICE_ID, false, &mii)?;
-                    Ok(())
-                },
-            )?;
-
             // Required to ensure the popup menu disappears again when a user clicks elsewhere.
             SetForegroundWindow(self.window).ok()?;
             TrackPopupMenuEx(
@@ -337,41 +312,8 @@ impl AudioSwitch {
                         }
                     }
                 }
-                // Device checked / unchecked in the popup menu.
-                device_menu_id => {
-                    let device = self
-                        .available_devices
-                        .iter_mut()
-                        .find(|device| device_menu_id == device_id_to_menu_id(&device.id));
-                    match device {
-                        None => {
-                            debug!("Unknown menu item selected: {device_menu_id}");
-                            return Ok(());
-                        }
-                        Some(selected_device) => {
-                            debug!("Toggling menu item for id: {device_menu_id}");
-                            let mut mii = MENUITEMINFOW {
-                                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                                fMask: MIIM_STATE,
-                                ..Default::default()
-                            };
-                            selected_device.selectable = !selected_device.selectable;
-                            GetMenuItemInfoW(self.popup_menu, device_menu_id, false, &mut mii)?;
-                            mii.fMask = MIIM_STATE;
-                            mii.fState = if selected_device.selectable {
-                                mii.fState | MFS_CHECKED
-                            } else {
-                                mii.fState & !MFS_CHECKED
-                            };
-                            SetMenuItemInfoW(self.popup_menu, device_menu_id, false, &mii)?;
-
-                            // Save the updated selectable state
-                            if let Err(e) = save_device_selectable_state(&self.available_devices) {
-                                error!("Failed to save device selectable state: {e}");
-                            }
-                        }
-                    }
-                    return Ok(());
+                _ => {
+                    debug!("Unknown menu item selected: {id}");
                 }
             }
         }
@@ -434,22 +376,11 @@ impl AudioSwitch {
     }
 }
 
-// Technically, these could collide but it's unlikely.
 const POPUP_EXIT_ID: u32 = 1;
-const POPUP_CURRENT_DEVICE_ID: u32 = 2;
+const POPUP_SETTINGS_ID: u32 = 2;
 const POPUP_ABOUT_ID: u32 = 3;
-const POPUP_SETTINGS_ID: u32 = 4;
 
-// Converts a device ID to a unique deterministic 16-bit ID for use in the popup menu.
-// This must only use the low 16 bits as it is received via `LOWORD` in the WM_COMMAND callback.
-fn device_id_to_menu_id(device_id: &str) -> u32 {
-    State::<crc16::ARC>::calculate(device_id.as_bytes()) as u32
-}
-
-unsafe fn create_popup_menu(
-    devices: &[AudioDevice],
-    current_device: &AudioDevice,
-) -> Result<HMENU, Box<dyn Error>> {
+unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
     unsafe {
         let menu = CreatePopupMenu()?;
         // Add a menu item to exit the application.
@@ -489,99 +420,6 @@ unsafe fn create_popup_menu(
                     },
                 )?;
                 Ok(())
-            },
-        )?;
-        // Add a separator.
-        InsertMenuItemW(
-            menu,
-            0,
-            true,
-            &MENUITEMINFOW {
-                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_FTYPE,
-                fType: MFT_SEPARATOR,
-                ..Default::default()
-            },
-        )?;
-
-        for device in devices.iter().rev() {
-            debug!(
-                "Adding device to popup menu: {:?} {:?}",
-                device.friendly_name,
-                device_id_to_menu_id(&device.id)
-            );
-            safe_strings::with_wide_str_mut(
-                &device.friendly_name,
-                |device_name| -> Result<(), Box<dyn Error>> {
-                    // Insert the device into the popup menu.
-                    InsertMenuItemW(
-                        menu,
-                        0,
-                        true,
-                        &MENUITEMINFOW {
-                            cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                            fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_STATE,
-                            fType: MFT_STRING,
-                            fState: if device.selectable {
-                                windows::Win32::UI::WindowsAndMessaging::MFS_CHECKED
-                            } else {
-                                windows::Win32::UI::WindowsAndMessaging::MFS_UNCHECKED
-                            },
-                            dwTypeData: device_name,
-                            cch: device_name.len() as u32 - 1,
-                            wID: device_id_to_menu_id(&device.id),
-                            ..Default::default()
-                        },
-                    )?;
-                    Ok(())
-                },
-            )?;
-        }
-        // Add a separator.
-        InsertMenuItemW(
-            menu,
-            0,
-            true,
-            &MENUITEMINFOW {
-                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_FTYPE,
-                fType: MFT_SEPARATOR,
-                ..Default::default()
-            },
-        )?;
-        // Add an item for the current device.
-        safe_strings::with_wide_str_mut(
-            &current_device.friendly_name,
-            |current_name| -> Result<(), Box<dyn Error>> {
-                // Insert the current device into the popup menu.
-                InsertMenuItemW(
-                    menu,
-                    0,
-                    true,
-                    &MENUITEMINFOW {
-                        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                        fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING | MIIM_ID,
-                        fType: MFT_STRING,
-                        dwTypeData: current_name,
-                        cch: current_name.len() as u32 - 1,
-                        fState: MFS_DISABLED,
-                        wID: POPUP_CURRENT_DEVICE_ID,
-                        ..Default::default()
-                    },
-                )?;
-                Ok(())
-            },
-        )?;
-        // Add a separator.
-        InsertMenuItemW(
-            menu,
-            0,
-            true,
-            &MENUITEMINFOW {
-                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                fMask: MIIM_FTYPE,
-                fType: MFT_SEPARATOR,
-                ..Default::default()
             },
         )?;
         // Add a menu item for the about dialog.
@@ -1061,7 +899,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let me = AudioSwitch {
             window,
             icon: AdaptiveIcon::new("audio_icon", "audio_icon")?,
-            popup_menu: create_popup_menu(&devices, current_device)?,
+            popup_menu: create_popup_menu()?,
             available_devices: devices,
             headphones_icon: AdaptiveIcon::new("headphones_icon", "headphones_icon_dark")?,
             headset_icon: AdaptiveIcon::new("headset_icon", "headset_icon_dark")?,
