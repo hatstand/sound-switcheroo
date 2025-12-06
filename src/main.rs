@@ -7,19 +7,15 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::ptr::null_mut;
 use std::rc::Rc;
-use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{
-    ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator, IMMNotificationClient,
-    MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor, Speakers, eConsole,
+    EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator, IMMNotificationClient,
+    MMDeviceEnumerator, Speakers, eConsole,
 };
-use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
-    STGM_READ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
 use windows::Win32::UI::Controls::{HOTKEYF_ALT, HOTKEYF_CONTROL, HOTKEYF_SHIFT};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOD_ALT, MOD_CONTROL, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
@@ -41,17 +37,21 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_core::{BOOL, GUID};
 use windows_strings::{PCWSTR, w};
 
+mod audio_device;
 mod config;
 mod notification_client;
 mod policy_config;
 mod safe_strings;
 mod settings_dialog;
 
+use audio_device::{
+    get_available_audio_devices, get_current_default_endpoint, get_device_friendly_name,
+    set_default_endpoint,
+};
 use config::{
     AudioDevice, apply_device_selectable_state, load_config, merge_device_states, save_config,
 };
 use notification_client::CustomImmNotificationClient;
-use policy_config::IPolicyConfig;
 use safe_strings::with_wide_str;
 use settings_dialog::show_settings_dialog;
 
@@ -65,52 +65,6 @@ pub(crate) const WM_DEVICE_CHANGE: u32 = WM_APP + 0x100;
 // These represent INDEXTOSTATEIMAGEMASK(1) and INDEXTOSTATEIMAGEMASK(2)
 const LVIS_UNCHECKED: isize = 0x1000; // Checkbox unchecked
 const LVIS_CHECKED: isize = 0x2000; // Checkbox checked
-
-/// Sets the default audio endpoint for the specified role using raw COM interface calls
-fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
-    unsafe {
-        debug!("Attempting to set default endpoint for device: {device_id}, role: {role:?}",);
-        let policy_config: IPolicyConfig =
-            CoCreateInstance(&policy_config::CLSID_POLICY_CONFIG, None, CLSCTX_ALL)?;
-
-        // Use safe scoped approach for string conversion
-        with_wide_str(device_id, |wide_device_id| {
-            policy_config.SetDefaultEndpoint(wide_device_id, role)
-        })?;
-        Ok(())
-    }
-}
-
-/// Gets the friendly name for a device given its ID
-pub(crate) fn get_device_friendly_name(device_id: &str) -> Result<String, Box<dyn Error>> {
-    unsafe {
-        let device_enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-
-        let device = with_wide_str(device_id, |wide_id| device_enumerator.GetDevice(wide_id))?;
-
-        let props = device.OpenPropertyStore(STGM_READ)?;
-        let friendly_name = props.GetValue(&PKEY_Device_FriendlyName)?;
-        propvariant_to_string(&friendly_name)
-    }
-}
-
-/// Gets the current default audio endpoint for debugging
-fn get_current_default_endpoint(role: ERole) -> Result<String, Box<dyn Error>> {
-    unsafe {
-        CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
-        let device_enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-
-        let endpoint = device_enumerator
-            .GetDefaultAudioEndpoint(windows::Win32::Media::Audio::eRender, role)?;
-
-        let device_id = endpoint.GetId()?;
-        let device_id_str = device_id.to_string()?;
-
-        Ok(device_id_str)
-    }
-}
 
 fn string_to_tip(s: &str) -> [u16; 128] {
     let mut ret = [0u16; 128];
@@ -431,58 +385,6 @@ unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
         )?;
         Ok(menu)
     }
-}
-
-unsafe fn propvariant_to_string(propvar: &PROPVARIANT) -> Result<String, Box<dyn Error>> {
-    unsafe {
-        match propvar.vt() {
-            VT_LPWSTR => Ok(String::from_utf16_lossy(
-                propvar.Anonymous.Anonymous.Anonymous.pwszVal.as_wide(),
-            )),
-            _ => {
-                bail!("Unsupported PROPVARIANT type: {:?}", propvar.vt());
-            }
-        }
-    }
-}
-
-fn get_available_audio_devices() -> Result<Vec<AudioDevice>, Box<dyn Error>> {
-    let mut devices = Vec::new();
-    unsafe {
-        let device_enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        let endpoints = device_enumerator.EnumAudioEndpoints(
-            windows::Win32::Media::Audio::eRender,
-            windows::Win32::Media::Audio::DEVICE_STATE_ACTIVE,
-        )?;
-
-        for i in 0..endpoints.GetCount()? {
-            let endpoint = endpoints.Item(i)?;
-            let device_id = endpoint.GetId()?;
-            let device_id_str = device_id.to_string()?;
-            let props = endpoint.OpenPropertyStore(STGM_READ)?;
-            let friendly_name = props.GetValue(&PKEY_Device_FriendlyName)?;
-            let form_factor_var = props.GetValue(&PKEY_AudioEndpoint_FormFactor)?;
-            let form_factor: EndpointFormFactor = match form_factor_var.vt() {
-                VT_UI4 => {
-                    EndpointFormFactor(form_factor_var.Anonymous.Anonymous.Anonymous.ulVal as i32)
-                }
-                _ => {
-                    bail!(
-                        "Unsupported PROPVARIANT type for form factor: {:?}",
-                        form_factor_var,
-                    );
-                }
-            };
-            devices.push(AudioDevice {
-                id: device_id_str,
-                friendly_name: propvariant_to_string(&friendly_name)?,
-                selectable: true,
-                form_factor,
-            });
-        }
-    }
-    Ok(devices)
 }
 
 fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
