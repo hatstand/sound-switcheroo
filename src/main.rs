@@ -25,8 +25,14 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
+use windows::Win32::UI::Controls::{
+    InitCommonControlsEx, HKM_GETHOTKEY, HKM_SETHOTKEY, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES,
+    INITCOMMONCONTROLSEX, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_PARAM,
+    LVIF_TEXT, LVIS_STATEIMAGEMASK, LVITEMW, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW,
+    LVM_INSERTITEMW, LVM_SETITEMSTATE,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
+    RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
 };
 use windows::Win32::UI::Shell::{
     FOLDERID_RoamingAppData, SHGetKnownFolderPath, ShellExecuteW, Shell_NotifyIconW,
@@ -35,13 +41,15 @@ use windows::Win32::UI::Shell::{
     NOTIFYICON_VERSION_4,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GetCursorPos,
-    GetMenuItemInfoW, GetMessageW, GetWindowLongPtrW, InsertMenuItemW, LoadIconW, PostMessageW,
-    PostQuitMessage, RegisterClassExW, SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DialogBoxParamW,
+    DispatchMessageW, EndDialog, GetCursorPos, GetDlgItem, GetMenuItemInfoW, GetMessageW,
+    GetWindowLongPtrW, InsertMenuItemW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
+    SendDlgItemMessageW, SendMessageW, SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW,
     TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON, HMENU, MENUITEMINFOW, MFS_CHECKED,
     MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
     SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
+    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_INITDIALOG, WM_QUIT, WM_RBUTTONUP,
+    WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
 use windows_strings::{w, PCWSTR};
@@ -53,6 +61,9 @@ use policy_config::IPolicyConfig;
 use safe_strings::with_wide_str;
 
 const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
+const IDD_SETTINGS: u32 = 101;
+const IDC_HOTKEY: i32 = 1001;
+const IDC_DEVICE_LIST: i32 = 1002;
 
 #[windows::core::implement(IMMNotificationClient)]
 pub struct CustomImmNotificationClient;
@@ -166,7 +177,7 @@ impl AdaptiveIcon {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct AudioDevice {
     id: String,
     friendly_name: String,
@@ -186,6 +197,9 @@ struct AudioSwitch {
     headphones_icon: AdaptiveIcon,
     headset_icon: AdaptiveIcon,
     speaker_icon: AdaptiveIcon,
+
+    hotkey_vk: u8,
+    hotkey_mods: u8,
 }
 
 impl Drop for AudioSwitch {
@@ -286,6 +300,40 @@ impl AudioSwitch {
                         PCWSTR(null_mut()),
                         SW_SHOWNORMAL,
                     );
+                }
+                POPUP_SETTINGS_ID => {
+                    if let Ok(true) = show_settings_dialog(
+                        self.window,
+                        &mut self.available_devices,
+                        &mut self.hotkey_vk,
+                        &mut self.hotkey_mods,
+                    ) {
+                        // Unregister old hotkey
+                        let _ = UnregisterHotKey(None, HOTKEY_ID);
+
+                        // Re-register hotkey with new values
+                        let mut mods =
+                            windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS(0);
+                        if self.hotkey_mods & 0x01 != 0 {
+                            mods |= MOD_ALT;
+                        }
+                        if self.hotkey_mods & 0x02 != 0 {
+                            mods |= MOD_CONTROL;
+                        }
+                        if self.hotkey_mods & 0x04 != 0 {
+                            mods |= MOD_SHIFT;
+                        }
+
+                        if let Err(e) = RegisterHotKey(None, HOTKEY_ID, mods, self.hotkey_vk as u32)
+                        {
+                            error!("Failed to register new hotkey: {e}");
+                        }
+
+                        // Save settings
+                        if let Err(e) = save_device_selectable_state(&self.available_devices) {
+                            error!("Failed to save device selectable state: {e}");
+                        }
+                    }
                 }
                 // Device checked / unchecked in the popup menu.
                 device_menu_id => {
@@ -388,6 +436,7 @@ impl AudioSwitch {
 const POPUP_EXIT_ID: u32 = 1;
 const POPUP_CURRENT_DEVICE_ID: u32 = 2;
 const POPUP_ABOUT_ID: u32 = 3;
+const POPUP_SETTINGS_ID: u32 = 4;
 
 // Converts a device ID to a unique deterministic 16-bit ID for use in the popup menu.
 // This must only use the low 16 bits as it is received via `LOWORD` in the WM_COMMAND callback.
@@ -419,6 +468,27 @@ unsafe fn create_popup_menu(
             )?;
             Ok(())
         })?;
+        // Add Settings menu item
+        safe_strings::with_wide_str_mut(
+            "Settings...",
+            |settings_name| -> Result<(), Box<dyn Error>> {
+                InsertMenuItemW(
+                    menu,
+                    0,
+                    true,
+                    &MENUITEMINFOW {
+                        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                        fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
+                        fType: MFT_STRING,
+                        dwTypeData: settings_name,
+                        cch: settings_name.len() as u32 - 1,
+                        wID: POPUP_SETTINGS_ID,
+                        ..Default::default()
+                    },
+                )?;
+                Ok(())
+            },
+        )?;
         // Add a separator.
         InsertMenuItemW(
             menu,
@@ -714,6 +784,188 @@ unsafe fn load_icon(icon_name: &str) -> Result<HICON, Box<dyn Error>> {
     }
 }
 
+struct SettingsDialog {
+    devices: Vec<AudioDevice>,
+    hotkey_vk: u8,
+    hotkey_mods: u8,
+}
+
+unsafe extern "system" fn settings_dialog_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> isize {
+    unsafe {
+        match msg {
+            WM_INITDIALOG => {
+                let settings = lparam.0 as *mut SettingsDialog;
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, settings as isize);
+
+                let settings_ref = &mut *settings;
+
+                // Initialize hotkey control
+                let hotkey_value =
+                    ((settings_ref.hotkey_mods as u16) << 8) | (settings_ref.hotkey_vk as u16);
+                SendDlgItemMessageW(
+                    hwnd,
+                    IDC_HOTKEY,
+                    HKM_SETHOTKEY,
+                    WPARAM(hotkey_value as usize),
+                    LPARAM(0),
+                );
+
+                // Initialize device list
+                let list_hwnd = GetDlgItem(Some(hwnd), IDC_DEVICE_LIST).unwrap();
+
+                // Add columns
+                safe_strings::with_wide_str_mut("Device Name", |col_text| {
+                    let lvc = LVCOLUMNW {
+                        mask: LVCF_TEXT | LVCF_WIDTH,
+                        cx: 250,
+                        pszText: windows_core::PWSTR(col_text.0),
+                        ..Default::default()
+                    };
+                    SendMessageW(
+                        list_hwnd,
+                        LVM_INSERTCOLUMNW,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(&lvc as *const _ as isize)),
+                    );
+                });
+
+                // Add devices to list
+                for (idx, device) in settings_ref.devices.iter().enumerate() {
+                    safe_strings::with_wide_str_mut(&device.friendly_name, |device_name| {
+                        let lvi = LVITEMW {
+                            mask: LVIF_TEXT | LVIF_PARAM,
+                            iItem: idx as i32,
+                            pszText: windows_core::PWSTR(device_name.0),
+                            lParam: LPARAM(idx as isize),
+                            ..Default::default()
+                        };
+                        SendMessageW(
+                            list_hwnd,
+                            LVM_INSERTITEMW,
+                            Some(WPARAM(0)),
+                            Some(LPARAM(&lvi as *const _ as isize)),
+                        );
+
+                        // Set checkbox state
+                        let state = if device.selectable { 0x2000 } else { 0x1000 }; // Checked/unchecked
+                        let state_lvi = LVITEMW {
+                            stateMask: LVIS_STATEIMAGEMASK,
+                            state: LIST_VIEW_ITEM_STATE_FLAGS(state),
+                            ..Default::default()
+                        };
+                        SendMessageW(
+                            list_hwnd,
+                            LVM_SETITEMSTATE,
+                            Some(WPARAM(idx)),
+                            Some(LPARAM(&state_lvi as *const _ as isize)),
+                        );
+                    });
+                }
+
+                1
+            }
+            WM_COMMAND => {
+                let cmd = (wparam.0 & 0xFFFF) as u32;
+                match cmd {
+                    1 => {
+                        // IDOK
+                        let settings =
+                            GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut SettingsDialog;
+                        let settings_ref = &mut *settings;
+
+                        // Get hotkey value
+                        let hotkey = SendDlgItemMessageW(
+                            hwnd,
+                            IDC_HOTKEY,
+                            HKM_GETHOTKEY,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
+                        settings_ref.hotkey_vk = (hotkey.0 & 0xFF) as u8;
+                        settings_ref.hotkey_mods = ((hotkey.0 >> 8) & 0xFF) as u8;
+
+                        // Get device selections
+                        let list_hwnd = GetDlgItem(Some(hwnd), IDC_DEVICE_LIST).unwrap();
+                        let count = SendMessageW(
+                            list_hwnd,
+                            LVM_GETITEMCOUNT,
+                            Some(WPARAM(0)),
+                            Some(LPARAM(0)),
+                        )
+                        .0;
+
+                        for i in 0..count {
+                            let state = SendMessageW(
+                                list_hwnd,
+                                LVM_GETITEMSTATE,
+                                Some(WPARAM(i as usize)),
+                                Some(LPARAM(LVIS_STATEIMAGEMASK.0 as isize)),
+                            )
+                            .0;
+                            settings_ref.devices[i as usize].selectable = (state & 0x2000) != 0;
+                        }
+
+                        EndDialog(hwnd, 1).expect("EndDialog error");
+                        1
+                    }
+                    2 => {
+                        // IDCANCEL
+                        EndDialog(hwnd, 0).expect("EndDialog failed IDCANCEL");
+                        1
+                    }
+                    _ => 0,
+                }
+            }
+            _ => 0,
+        }
+    }
+}
+
+fn show_settings_dialog(
+    parent: HWND,
+    devices: &mut Vec<AudioDevice>,
+    hotkey_vk: &mut u8,
+    hotkey_mods: &mut u8,
+) -> Result<bool, Box<dyn Error>> {
+    unsafe {
+        // Initialize common controls
+        let icc = INITCOMMONCONTROLSEX {
+            dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+            dwICC: ICC_LISTVIEW_CLASSES | ICC_HOTKEY_CLASS,
+        };
+        InitCommonControlsEx(&icc).ok()?;
+
+        let mut settings = SettingsDialog {
+            devices: devices.clone(),
+            hotkey_vk: *hotkey_vk,
+            hotkey_mods: *hotkey_mods,
+        };
+
+        let module = GetModuleHandleW(None)?;
+        let result = DialogBoxParamW(
+            Some(module.into()),
+            PCWSTR(IDD_SETTINGS as *const u16),
+            Some(parent),
+            Some(settings_dialog_proc),
+            LPARAM(&mut settings as *mut _ as isize),
+        );
+
+        if result == 1 {
+            *devices = settings.devices;
+            *hotkey_vk = settings.hotkey_vk;
+            *hotkey_mods = settings.hotkey_mods;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+}
+
 const HOTKEY_ID: i32 = 1225708739;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -776,6 +1028,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             headphones_icon: AdaptiveIcon::new("headphones_icon", "headphones_icon_dark")?,
             headset_icon: AdaptiveIcon::new("headset_icon", "headset_icon_dark")?,
             speaker_icon: AdaptiveIcon::new("speaker_icon", "speaker_icon_dark")?,
+            hotkey_vk: 0x58,                 // 'X' key
+            hotkey_mods: 0x01 | 0x02 | 0x04, // ALT | CONTROL | SHIFT
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
