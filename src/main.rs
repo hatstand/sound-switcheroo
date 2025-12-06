@@ -11,13 +11,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::ptr::null_mut;
 use std::rc::Rc;
-use windows::Win32;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{
     ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator, IMMNotificationClient,
-    IMMNotificationClient_Impl, MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor, Speakers,
-    eConsole,
+    MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor, Speakers, eConsole,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
@@ -47,10 +45,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_core::{BOOL, GUID};
 use windows_strings::{PCWSTR, w};
 
+mod notification_client;
 mod policy_config;
 mod safe_strings;
 mod settings_dialog;
 
+use notification_client::CustomImmNotificationClient;
 use policy_config::IPolicyConfig;
 use safe_strings::with_wide_str;
 use settings_dialog::show_settings_dialog;
@@ -59,92 +59,12 @@ const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9
 const IDD_SETTINGS: u32 = 101;
 const IDC_HOTKEY: i32 = 1001;
 const IDC_DEVICE_LIST: i32 = 1002;
-const WM_DEVICE_CHANGE: u32 = WM_APP + 0x100;
+pub(crate) const WM_DEVICE_CHANGE: u32 = WM_APP + 0x100;
 
 // ListView checkbox state constants (state image mask values)
 // These represent INDEXTOSTATEIMAGEMASK(1) and INDEXTOSTATEIMAGEMASK(2)
 const LVIS_UNCHECKED: isize = 0x1000; // Checkbox unchecked
 const LVIS_CHECKED: isize = 0x2000; // Checkbox checked
-
-#[windows::core::implement(IMMNotificationClient)]
-pub struct CustomImmNotificationClient {
-    settings_dialog: Rc<RefCell<Option<HWND>>>,
-}
-
-#[allow(non_snake_case)]
-impl IMMNotificationClient_Impl for CustomImmNotificationClient_Impl {
-    fn OnDeviceStateChanged(
-        &self,
-        pwstrdeviceid: &windows_core::PCWSTR,
-        dwnewstate: windows::Win32::Media::Audio::DEVICE_STATE,
-    ) -> windows_core::Result<()> {
-        let device_id = unsafe { pwstrdeviceid.to_string().unwrap_or_default() };
-        let friendly_name =
-            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
-        debug!(
-            "Device state changed: name='{friendly_name}', id={device_id}, new_state={dwnewstate:?}"
-        );
-        if let Some(hwnd) = *self.settings_dialog.borrow() {
-            unsafe {
-                let _ = PostMessageW(Some(hwnd), WM_DEVICE_CHANGE, WPARAM(0), LPARAM(0));
-            }
-        }
-        Ok(())
-    }
-
-    fn OnDeviceAdded(&self, pwstrdeviceid: &windows_core::PCWSTR) -> windows_core::Result<()> {
-        let device_id = unsafe { pwstrdeviceid.to_string().unwrap_or_default() };
-        let friendly_name =
-            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
-        debug!("Device added: name='{friendly_name}', id={device_id}");
-        if let Some(hwnd) = *self.settings_dialog.borrow() {
-            unsafe {
-                let _ = PostMessageW(Some(hwnd), WM_DEVICE_CHANGE, WPARAM(0), LPARAM(0));
-            }
-        }
-        Ok(())
-    }
-
-    fn OnDeviceRemoved(&self, pwstrdeviceid: &windows_core::PCWSTR) -> windows_core::Result<()> {
-        let device_id = unsafe { pwstrdeviceid.to_string().unwrap_or_default() };
-        let friendly_name =
-            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
-        debug!("Device removed: name='{friendly_name}', id={device_id}");
-        if let Some(hwnd) = *self.settings_dialog.borrow() {
-            unsafe {
-                let _ = PostMessageW(Some(hwnd), WM_DEVICE_CHANGE, WPARAM(0), LPARAM(0));
-            }
-        }
-        Ok(())
-    }
-
-    fn OnDefaultDeviceChanged(
-        &self,
-        flow: windows::Win32::Media::Audio::EDataFlow,
-        role: ERole,
-        pwstrdefaultdeviceid: &windows_core::PCWSTR,
-    ) -> windows_core::Result<()> {
-        let device_id = unsafe { pwstrdefaultdeviceid.to_string().unwrap_or_default() };
-        let friendly_name =
-            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
-        debug!(
-            "Default device changed: name='{friendly_name}', flow={flow:?}, role={role:?}, id={device_id}"
-        );
-        Ok(())
-    }
-
-    fn OnPropertyValueChanged(
-        &self,
-        pwstrdeviceid: &windows_core::PCWSTR,
-        key: &Win32::Foundation::PROPERTYKEY,
-    ) -> windows_core::Result<()> {
-        let device_id = unsafe { pwstrdeviceid.to_string().unwrap_or_default() };
-        let friendly_name =
-            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
-        debug!("Property value changed: name='{friendly_name}', id={device_id}, key={key:?}");
-        Ok(())
-    }
-}
 
 /// Sets the default audio endpoint for the specified role using raw COM interface calls
 fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
@@ -162,7 +82,7 @@ fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Erro
 }
 
 /// Gets the friendly name for a device given its ID
-fn get_device_friendly_name(device_id: &str) -> Result<String, Box<dyn Error>> {
+pub(crate) fn get_device_friendly_name(device_id: &str) -> Result<String, Box<dyn Error>> {
     unsafe {
         let device_enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
