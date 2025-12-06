@@ -10,11 +10,13 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use std::ptr::null_mut;
+use windows::Win32;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Media::Audio::{
     eConsole, ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator,
-    MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor, Speakers,
+    IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
+    PKEY_AudioEndpoint_FormFactor, Speakers,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
@@ -23,6 +25,9 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
+};
 use windows::Win32::UI::Shell::{
     FOLDERID_RoamingAppData, SHGetKnownFolderPath, ShellExecuteW, Shell_NotifyIconW,
     KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
@@ -36,7 +41,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON, HMENU, MENUITEMINFOW, MFS_CHECKED,
     MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
     SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
+    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
 use windows_strings::{w, PCWSTR};
@@ -48,6 +53,50 @@ use policy_config::IPolicyConfig;
 use safe_strings::with_wide_str;
 
 const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
+
+#[windows::core::implement(IMMNotificationClient)]
+pub struct CustomImmNotificationClient;
+
+#[allow(non_snake_case)]
+impl IMMNotificationClient_Impl for CustomImmNotificationClient_Impl {
+    fn OnDeviceStateChanged(
+        &self,
+        pwstrdeviceid: &windows_core::PCWSTR,
+        dwnewstate: windows::Win32::Media::Audio::DEVICE_STATE,
+    ) -> windows_core::Result<()> {
+        debug!("Device state changed: id={pwstrdeviceid:?}, new_state={dwnewstate:?}");
+        Ok(())
+    }
+
+    fn OnDeviceAdded(&self, pwstrdeviceid: &windows_core::PCWSTR) -> windows_core::Result<()> {
+        debug!("Device added: id={pwstrdeviceid:?}");
+        Ok(())
+    }
+
+    fn OnDeviceRemoved(&self, pwstrdeviceid: &windows_core::PCWSTR) -> windows_core::Result<()> {
+        debug!("Device removed: id={pwstrdeviceid:?}");
+        Ok(())
+    }
+
+    fn OnDefaultDeviceChanged(
+        &self,
+        flow: windows::Win32::Media::Audio::EDataFlow,
+        role: ERole,
+        pwstrdefaultdeviceid: &windows_core::PCWSTR,
+    ) -> windows_core::Result<()> {
+        debug!("Default device changed: flow={flow:?}, role={role:?}, id={pwstrdefaultdeviceid:?}");
+        Ok(())
+    }
+
+    fn OnPropertyValueChanged(
+        &self,
+        pwstrdeviceid: &windows_core::PCWSTR,
+        key: &Win32::Foundation::PROPERTYKEY,
+    ) -> windows_core::Result<()> {
+        debug!("Property value changed: id={pwstrdeviceid:?}, key={key:?}");
+        Ok(())
+    }
+}
 
 /// Sets the default audio endpoint for the specified role using raw COM interface calls
 fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
@@ -665,6 +714,8 @@ unsafe fn load_icon(icon_name: &str) -> Result<HICON, Box<dyn Error>> {
     }
 }
 
+const HOTKEY_ID: i32 = 1225708739;
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     info!("Audio Switch Tool");
@@ -760,20 +811,40 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Enable better callback API.
         Shell_NotifyIconW(NIM_SETVERSION, notify_icon_data).ok()?;
 
+        debug!("Registering for device notifications");
+        let not: IMMNotificationClient = CustomImmNotificationClient {}.into();
+        let device_enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        IMMDeviceEnumerator::RegisterEndpointNotificationCallback(&device_enumerator, &not)?;
+
+        debug!("Registering global hotkey");
+        RegisterHotKey(None, HOTKEY_ID, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 0x58)?;
+
         // Enter the message loop.
         info!("Running...");
         loop {
             let mut msg = MSG::default();
             match GetMessageW(&mut msg, None, 0, 0) {
+                // Returns false on WM_QUIT.
                 BOOL(0) => {
                     assert_eq!(msg.message, WM_QUIT);
                     info!("Quitting...");
                     break;
                 }
+                // Actual error from GetMessageW.
                 BOOL(-1) => {
                     error!("Failed to get message: {:?}", GetLastError());
                 }
+                // Normal window message.
                 BOOL(_) => {
+                    if msg.message == WM_HOTKEY && msg.wParam.0 as i32 == HOTKEY_ID {
+                        debug!("Hotkey pressed, switching to next device");
+                        let raw_me = GetWindowLongPtrW(window, GWLP_USERDATA) as *mut AudioSwitch;
+                        let me = raw_me.as_mut().unwrap();
+                        if let Err(e) = me.next_device() {
+                            error!("Failed to switch to next device: {e}");
+                        }
+                    }
                     DispatchMessageW(&msg);
                 }
             }
