@@ -23,6 +23,7 @@ version = "0.62.2"
 features = [
     "Devices_Custom",
     "Win32_Devices_FunctionDiscovery",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Media_Audio",
     "Win32_System_Com",

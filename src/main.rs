@@ -12,6 +12,7 @@ use std::ptr::null_mut;
 use windows::Win32;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
@@ -644,11 +645,27 @@ unsafe extern "system" fn settings_dialog_proc(
 
                 let settings_ref = &mut *settings;
 
+                // Enable dark mode and set icon based on system theme
+                let dark_mode = is_dark_mode().unwrap_or(false);
+                if dark_mode {
+                    let dark_mode_enabled: u32 = 1;
+                    let _ = DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_USE_IMMERSIVE_DARK_MODE,
+                        &dark_mode_enabled as *const _ as *const _,
+                        std::mem::size_of::<u32>() as u32,
+                    );
+                }
+
                 // Set dialog icon
-                if let Some(icon) = AdaptiveIcon::new("switcheroo_icon", "switcheroo_dark_icon")
-                    .ok()
-                    .map(|f| f.light)
+                if let Ok(adaptive_icon) =
+                    AdaptiveIcon::new("switcheroo_icon", "switcheroo_dark_icon")
                 {
+                    let icon = if dark_mode {
+                        adaptive_icon.dark
+                    } else {
+                        adaptive_icon.light
+                    };
                     SendMessageW(
                         hwnd,
                         WM_SETICON,
