@@ -47,11 +47,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, EndDialog, GetCursorPos, GetDlgItem, GetMessageW, GetWindowLongPtrW,
     GetWindowRect, InsertMenuItemW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
     SendDlgItemMessageW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
-    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON, HMENU, MENUITEMINFOW, MFS_DISABLED,
-    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, SWP_NOSIZE, SWP_NOZORDER,
-    SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_INITDIALOG, WM_QUIT, WM_RBUTTONUP,
-    WNDCLASSEXW,
+    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON, HMENU, ICON_BIG, ICON_SMALL,
+    MENUITEMINFOW, MFS_DISABLED, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
+    SWP_NOSIZE, SWP_NOZORDER, SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY,
+    WM_INITDIALOG, WM_QUIT, WM_RBUTTONUP, WM_SETICON, WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
 use windows_strings::{w, PCWSTR};
@@ -643,6 +643,25 @@ unsafe extern "system" fn settings_dialog_proc(
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, settings as isize);
 
                 let settings_ref = &mut *settings;
+
+                // Set dialog icon
+                if let Some(icon) = AdaptiveIcon::new("switcheroo_icon", "switcheroo_dark_icon")
+                    .ok()
+                    .map(|f| f.light)
+                {
+                    SendMessageW(
+                        hwnd,
+                        WM_SETICON,
+                        Some(WPARAM(ICON_BIG as usize)),
+                        Some(LPARAM(icon.0 as isize)),
+                    );
+                    SendMessageW(
+                        hwnd,
+                        WM_SETICON,
+                        Some(WPARAM(ICON_SMALL as usize)),
+                        Some(LPARAM(icon.0 as isize)),
+                    );
+                }
 
                 // Initialize hotkey control
                 let hotkey_value =
