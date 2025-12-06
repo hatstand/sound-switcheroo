@@ -40,6 +40,7 @@ mod notification_client;
 mod policy_config;
 mod safe_strings;
 mod settings_dialog;
+mod utils;
 
 use audio_device::{
     get_available_audio_devices, get_current_default_endpoint, get_device_friendly_name,
@@ -49,6 +50,7 @@ use config::{AudioDevice, apply_device_selectable_state, load_config, save_confi
 use icon::{AdaptiveIcon, is_dark_mode};
 use notification_client::CustomImmNotificationClient;
 use settings_dialog::{DialogResult, show_settings_dialog};
+use utils::{LOWORD, hotkeyf_to_mod, string_to_tip};
 
 const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
 const IDD_SETTINGS: u32 = 101;
@@ -61,40 +63,6 @@ const WM_REREGISTER_HOTKEY: u32 = WM_APP + 0x101;
 // These represent INDEXTOSTATEIMAGEMASK(1) and INDEXTOSTATEIMAGEMASK(2)
 const LVIS_UNCHECKED: isize = 0x1000; // Checkbox unchecked
 const LVIS_CHECKED: isize = 0x2000; // Checkbox checked
-
-/// Converts hotkey modifiers from HOTKEYF_ format (used by hotkey control)
-/// to MOD_ format (used by RegisterHotKey)
-fn hotkeyf_to_mod(
-    hotkeyf_mods: u8,
-) -> windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS {
-    use windows::Win32::UI::Controls::{HOTKEYF_ALT, HOTKEYF_CONTROL, HOTKEYF_SHIFT};
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
-    };
-
-    let mut mods = HOT_KEY_MODIFIERS(0);
-    if hotkeyf_mods & HOTKEYF_SHIFT as u8 != 0 {
-        mods |= MOD_SHIFT;
-    }
-    if hotkeyf_mods & HOTKEYF_CONTROL as u8 != 0 {
-        mods |= MOD_CONTROL;
-    }
-    if hotkeyf_mods & HOTKEYF_ALT as u8 != 0 {
-        mods |= MOD_ALT;
-    }
-    mods
-}
-
-fn string_to_tip(s: &str) -> [u16; 128] {
-    let mut ret = [0u16; 128];
-    let encoded: Vec<u16> = s.encode_utf16().collect();
-    assert!(encoded.len() < ret.len());
-    for (i, &c) in encoded.iter().enumerate() {
-        ret[i] = c;
-    }
-    ret[encoded.len()] = 0; // Null-terminate the string
-    ret
-}
 
 #[derive(Debug)]
 struct AudioSwitch {
@@ -526,15 +494,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 const TASKBAR_CB_ID: u32 = WM_APP + 0x42;
-#[allow(non_snake_case)]
-pub fn LOWORD(l: isize) -> isize {
-    l & 0xffff
-}
-
-#[allow(non_snake_case)]
-pub fn HIWORD(l: isize) -> isize {
-    (l >> 16) & 0xffff
-}
 
 unsafe extern "system" fn window_callback(
     hwnd: windows::Win32::Foundation::HWND,
