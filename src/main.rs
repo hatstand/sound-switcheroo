@@ -702,11 +702,11 @@ unsafe extern "system" fn settings_dialog_proc(
                     Some(LPARAM(LVS_EX_CHECKBOXES as isize)),
                 );
 
-                // Add columns
+                // Add single column that fills the list view width
                 safe_strings::with_wide_str_mut("Device Name", |col_text| {
                     let lvc = LVCOLUMNW {
                         mask: LVCF_TEXT | LVCF_WIDTH,
-                        cx: 250,
+                        cx: 260, // Match the list view width from resources
                         pszText: windows_core::PWSTR(col_text.0),
                         ..Default::default()
                     };
