@@ -24,11 +24,11 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW, GWLP_USERDATA,
     GetCursorPos, GetMessageW, GetWindowLongPtrW, HICON, HMENU, InsertMenuItemW, MENUITEMINFOW,
-    MFS_DISABLED, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassExW, SW_SHOWNORMAL, SetForegroundWindow, SetWindowLongPtrW,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_QUIT,
-    WM_RBUTTONUP, WNDCLASSEXW,
+    MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
+    PostMessageW, PostQuitMessage, RegisterClassExW, SW_SHOWNORMAL, SetForegroundWindow,
+    SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenuEx,
+    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY,
+    WM_HOTKEY, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
 use windows_strings::{PCWSTR, w};
@@ -68,7 +68,6 @@ const LVIS_CHECKED: isize = 0x2000; // Checkbox checked
 struct AudioSwitch {
     window: HWND,
     icon: AdaptiveIcon,
-    popup_menu: HMENU,
     available_devices: Vec<AudioDevice>,
 
     headphones_icon: AdaptiveIcon,
@@ -80,14 +79,6 @@ struct AudioSwitch {
 
     notification_client: IMMNotificationClient,
     settings_dialog_hwnd: Rc<RefCell<Option<HWND>>>,
-}
-
-impl Drop for AudioSwitch {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = DestroyMenu(self.popup_menu);
-        }
-    }
 }
 
 impl AudioSwitch {
@@ -115,10 +106,22 @@ impl AudioSwitch {
     fn show_popup_menu(&self, x: i32, y: i32) -> Result<()> {
         debug!("Showing popup menu at ({x}, {y})");
         unsafe {
+            // Get current device name
+            let current_device_id = get_current_default_endpoint(eConsole)?;
+            let current_device_name = self
+                .available_devices
+                .iter()
+                .find(|d| d.id == current_device_id)
+                .map(|d| d.friendly_name.as_str())
+                .unwrap_or("Unknown Device");
+
+            // Create menu with current device info
+            let menu = create_popup_menu(current_device_name)?;
+
             // Required to ensure the popup menu disappears again when a user clicks elsewhere.
             SetForegroundWindow(self.window).ok()?;
             TrackPopupMenuEx(
-                self.popup_menu,
+                menu,
                 TPM_LEFTALIGN.0 | TPM_BOTTOMALIGN.0 | TPM_RIGHTBUTTON.0,
                 x,
                 y,
@@ -126,6 +129,9 @@ impl AudioSwitch {
                 None,
             )
             .ok()?;
+
+            // Clean up the temporary menu
+            let _ = DestroyMenu(menu);
         }
         Ok(())
     }
@@ -251,8 +257,9 @@ impl AudioSwitch {
 const POPUP_EXIT_ID: u32 = 1;
 const POPUP_SETTINGS_ID: u32 = 2;
 const POPUP_ABOUT_ID: u32 = 3;
+const POPUP_CURRENT_DEVICE_ID: u32 = 4;
 
-unsafe fn create_popup_menu() -> Result<HMENU> {
+unsafe fn create_popup_menu(current_device_name: &str) -> Result<HMENU> {
     unsafe {
         let menu = CreatePopupMenu()?;
         // Add a menu item to exit the application.
@@ -327,6 +334,37 @@ unsafe fn create_popup_menu() -> Result<HMENU> {
             )?;
             Ok(())
         })?;
+        // Add current device as a disabled item
+        safe_strings::with_wide_str_mut(current_device_name, |device_name| -> Result<()> {
+            InsertMenuItemW(
+                menu,
+                1,
+                true,
+                &MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_FTYPE | MIIM_STATE | MIIM_ID | MIIM_STRING,
+                    fType: MFT_STRING,
+                    dwTypeData: device_name,
+                    cch: device_name.len() as u32 - 1,
+                    wID: POPUP_CURRENT_DEVICE_ID,
+                    fState: MFS_DISABLED,
+                    ..Default::default()
+                },
+            )?;
+            Ok(())
+        })?;
+        // Add a separator line
+        InsertMenuItemW(
+            menu,
+            2,
+            true,
+            &MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE,
+                fType: MFT_SEPARATOR,
+                ..Default::default()
+            },
+        )?;
         Ok(menu)
     }
 }
@@ -402,7 +440,6 @@ fn main() -> Result<()> {
         let me = AudioSwitch {
             window,
             icon: AdaptiveIcon::new("switcheroo_icon", "switcheroo_dark_icon")?,
-            popup_menu: create_popup_menu()?,
             available_devices: devices,
             headphones_icon: AdaptiveIcon::new("headphones_icon", "headphones_icon_dark")?,
             headset_icon: AdaptiveIcon::new("headset_icon", "headset_icon_dark")?,
