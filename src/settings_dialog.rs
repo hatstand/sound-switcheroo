@@ -400,6 +400,9 @@ unsafe extern "system" fn settings_dialog_proc(
 ) -> isize {
     unsafe {
         match msg {
+            // Dialog initialization - called when the dialog is first created.
+            // Sets up dark mode, icons, hotkey control, device list, and centers the dialog.
+            // Returns 1 to set focus to the control specified by the system.
             WM_INITDIALOG => {
                 if let Err(e) = handle_init_dialog(hwnd, lparam) {
                     error!("Error in WM_INITDIALOG: {}", e);
@@ -407,7 +410,13 @@ unsafe extern "system" fn settings_dialog_proc(
                 }
                 1
             }
+            // Dialog destruction - called when the dialog is being destroyed.
+            // No cleanup needed as dialog handle is already cleared.
+            // Returns 0 as per Windows convention for WM_DESTROY.
             WM_DESTROY => 0,
+            // Custom message sent by IMMNotificationClient when audio devices change.
+            // Refreshes the device list to reflect current system state.
+            // Returns 1 to indicate the message was processed.
             WM_DEVICE_CHANGE => {
                 if let Err(e) = handle_device_change(hwnd) {
                     error!("Error in WM_DEVICE_CHANGE: {}", e);
@@ -415,9 +424,13 @@ unsafe extern "system" fn settings_dialog_proc(
                 }
                 1
             }
+            // Command message sent when controls (buttons) are activated.
+            // Handles OK (save settings) and Cancel (discard changes) buttons.
             WM_COMMAND => {
                 let cmd = (wparam.0 & 0xFFFF) as u32;
                 match cmd {
+                    // OK button clicked - save hotkey and device selections, close dialog.
+                    // Returns 1 to indicate the command was processed.
                     1 => {
                         // IDOK
                         if let Err(e) = handle_ok_command(hwnd) {
@@ -426,6 +439,8 @@ unsafe extern "system" fn settings_dialog_proc(
                         }
                         1
                     }
+                    // Cancel button clicked - discard changes and close dialog.
+                    // Returns 1 to indicate the command was processed.
                     2 => {
                         // IDCANCEL
                         if let Err(e) = handle_cancel_command(hwnd) {
@@ -434,9 +449,11 @@ unsafe extern "system" fn settings_dialog_proc(
                         }
                         1
                     }
+                    // Unknown command ID - return 0 to indicate not processed.
                     _ => 0,
                 }
             }
+            // Unhandled message - return 0 to let system default processing occur.
             _ => 0,
         }
     }
