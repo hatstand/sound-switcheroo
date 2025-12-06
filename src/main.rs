@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use anyhow::{Context, Result};
 use defer::defer;
 use log::{debug, error, info};
 use std::cell::RefCell;
-use std::error::Error;
 use std::ptr::null_mut;
 use std::rc::Rc;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -92,10 +92,7 @@ impl Drop for AudioSwitch {
 
 impl AudioSwitch {
     #![allow(non_upper_case_globals)]
-    fn icon_for_form_factor(
-        &self,
-        form_factor: EndpointFormFactor,
-    ) -> Result<HICON, Box<dyn Error>> {
+    fn icon_for_form_factor(&self, form_factor: EndpointFormFactor) -> Result<HICON> {
         let adaptive_icon = match form_factor {
             Headphones => &self.headphones_icon,
             Headset => &self.headset_icon,
@@ -105,17 +102,17 @@ impl AudioSwitch {
         adaptive_icon.icon()
     }
 
-    fn current_icon(&self) -> Result<HICON, Box<dyn Error>> {
+    fn current_icon(&self) -> Result<HICON> {
         let current_device_id = get_current_default_endpoint(eConsole)?;
         let current_device = self
             .available_devices
             .iter()
             .find(|d| d.id == current_device_id)
-            .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
+            .context("Current device not found")?;
         self.icon_for_form_factor(current_device.form_factor)
     }
 
-    fn show_popup_menu(&self, x: i32, y: i32) -> Result<(), Box<dyn Error>> {
+    fn show_popup_menu(&self, x: i32, y: i32) -> Result<()> {
         debug!("Showing popup menu at ({x}, {y})");
         unsafe {
             // Required to ensure the popup menu disappears again when a user clicks elsewhere.
@@ -133,7 +130,7 @@ impl AudioSwitch {
         Ok(())
     }
 
-    fn menu_selection(&mut self, id: u32) -> Result<(), Box<dyn Error>> {
+    fn menu_selection(&mut self, id: u32) -> Result<()> {
         debug!("Menu item selected: {id}");
         unsafe {
             match id {
@@ -195,7 +192,7 @@ impl AudioSwitch {
         Ok(())
     }
 
-    fn next_device(&mut self) -> Result<(), Box<dyn Error>> {
+    fn next_device(&mut self) -> Result<()> {
         let current_device = get_current_default_endpoint(eConsole)?;
         debug!("Switching to next device from: {current_device}");
         let current_index = self
@@ -221,7 +218,7 @@ impl AudioSwitch {
             .find(|(i, _)| *i > current_index)
             // or the first selectable device if none found as a wraparound.
             .or_else(|| selectable_devices.first())
-            .ok_or_else(|| simple_error::SimpleError::new("No selectable devices found"))?;
+            .context("No selectable devices found")?;
         info!("Switching to device: {:}", cand_device.friendly_name,);
         set_default_endpoint(&cand_device.id, eConsole)?;
         // Update the tooltip to reflect the new current device.
@@ -255,11 +252,11 @@ const POPUP_EXIT_ID: u32 = 1;
 const POPUP_SETTINGS_ID: u32 = 2;
 const POPUP_ABOUT_ID: u32 = 3;
 
-unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
+unsafe fn create_popup_menu() -> Result<HMENU> {
     unsafe {
         let menu = CreatePopupMenu()?;
         // Add a menu item to exit the application.
-        safe_strings::with_wide_str_mut("Exit", |exit_name| -> Result<(), Box<dyn Error>> {
+        safe_strings::with_wide_str_mut("Exit", |exit_name| -> Result<()> {
             InsertMenuItemW(
                 menu,
                 0,
@@ -277,28 +274,25 @@ unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
             Ok(())
         })?;
         // Add Settings menu item
-        safe_strings::with_wide_str_mut(
-            "Settings...",
-            |settings_name| -> Result<(), Box<dyn Error>> {
-                InsertMenuItemW(
-                    menu,
-                    0,
-                    true,
-                    &MENUITEMINFOW {
-                        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                        fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
-                        fType: MFT_STRING,
-                        dwTypeData: settings_name,
-                        cch: settings_name.len() as u32 - 1,
-                        wID: POPUP_SETTINGS_ID,
-                        ..Default::default()
-                    },
-                )?;
-                Ok(())
-            },
-        )?;
+        safe_strings::with_wide_str_mut("Settings...", |settings_name| -> Result<()> {
+            InsertMenuItemW(
+                menu,
+                0,
+                true,
+                &MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING,
+                    fType: MFT_STRING,
+                    dwTypeData: settings_name,
+                    cch: settings_name.len() as u32 - 1,
+                    wID: POPUP_SETTINGS_ID,
+                    ..Default::default()
+                },
+            )?;
+            Ok(())
+        })?;
         // Add a menu item for the about dialog.
-        safe_strings::with_wide_str_mut("About", |about_name| -> Result<(), Box<dyn Error>> {
+        safe_strings::with_wide_str_mut("About", |about_name| -> Result<()> {
             InsertMenuItemW(
                 menu,
                 0,
@@ -316,33 +310,30 @@ unsafe fn create_popup_menu() -> Result<HMENU, Box<dyn Error>> {
             Ok(())
         })?;
         // Add a nice name to the top of the menu.
-        safe_strings::with_wide_str_mut(
-            "Sound Switcheroo",
-            |title_name| -> Result<(), Box<dyn Error>> {
-                InsertMenuItemW(
-                    menu,
-                    0,
-                    true,
-                    &MENUITEMINFOW {
-                        cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                        fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING,
-                        fType: MFT_STRING,
-                        dwTypeData: title_name,
-                        cch: title_name.len() as u32 - 1,
-                        fState: MFS_DISABLED,
-                        ..Default::default()
-                    },
-                )?;
-                Ok(())
-            },
-        )?;
+        safe_strings::with_wide_str_mut("Sound Switcheroo", |title_name| -> Result<()> {
+            InsertMenuItemW(
+                menu,
+                0,
+                true,
+                &MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_FTYPE | MIIM_STATE | MIIM_STRING,
+                    fType: MFT_STRING,
+                    dwTypeData: title_name,
+                    cch: title_name.len() as u32 - 1,
+                    fState: MFS_DISABLED,
+                    ..Default::default()
+                },
+            )?;
+            Ok(())
+        })?;
         Ok(menu)
     }
 }
 
 const HOTKEY_ID: i32 = 1225708739;
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<()> {
     env_logger::init();
     info!("Audio Switch Tool");
     unsafe {
@@ -392,7 +383,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let current_device = devices
             .iter()
             .find(|d| d.id == current_device_id)
-            .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
+            .context("Current device not found")?;
         let tooltip = current_device.friendly_name.clone();
 
         debug!("Registering for device notifications");

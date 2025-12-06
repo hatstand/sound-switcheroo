@@ -1,5 +1,4 @@
-use simple_error::bail;
-use std::error::Error;
+use anyhow::{Result, bail};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{HICON, LoadIconW};
 
@@ -14,7 +13,7 @@ pub struct AdaptiveIcon {
 }
 
 impl AdaptiveIcon {
-    pub fn new(light_icon_name: &str, dark_icon_name: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn new(light_icon_name: &str, dark_icon_name: &str) -> Result<Self> {
         let light_icon = unsafe { load_icon(light_icon_name)? };
         let dark_icon = unsafe { load_icon(dark_icon_name)? };
         Ok(Self {
@@ -23,7 +22,7 @@ impl AdaptiveIcon {
         })
     }
 
-    pub fn icon(&self) -> Result<HICON, Box<dyn Error>> {
+    pub fn icon(&self) -> Result<HICON> {
         if is_dark_mode()? {
             Ok(self.dark)
         } else {
@@ -33,7 +32,7 @@ impl AdaptiveIcon {
 }
 
 /// Checks if Windows is currently in dark mode
-pub fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
+pub fn is_dark_mode() -> Result<bool> {
     let theme_key = windows_registry::CURRENT_USER
         .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")?;
     let light_theme = theme_key.get_u32("AppsUseLightTheme")? == 1;
@@ -41,7 +40,7 @@ pub fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
 }
 
 /// Loads an icon from the current module's resources
-unsafe fn load_icon(icon_name: &str) -> Result<HICON, Box<dyn Error>> {
+unsafe fn load_icon(icon_name: &str) -> Result<HICON> {
     unsafe {
         let module = GetModuleHandleW(None)?;
         let icon = with_wide_str(icon_name, |wide_icon_name| {

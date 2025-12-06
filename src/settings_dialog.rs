@@ -1,7 +1,7 @@
+use anyhow::{Context, Result};
 use log::{debug, error};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::error::Error;
 use std::rc::Rc;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
@@ -61,7 +61,7 @@ fn dialog_box_param(
     hwnd_parent: Option<HWND>,
     dialog_func: DLGPROC,
     init_param: LPARAM,
-) -> Result<DialogBoxResult, Box<dyn Error>> {
+) -> Result<DialogBoxResult> {
     unsafe {
         let result = DialogBoxParamW(
             hinstance,
@@ -75,9 +75,9 @@ fn dialog_box_param(
             DIALOG_RESULT_CANCEL => Ok(DialogBoxResult::Cancel),
             0 | -1 => {
                 let error = GetLastError();
-                Err(format!("DialogBoxParamW failed with error: {:?}", error).into())
+                anyhow::bail!("DialogBoxParamW failed with error: {:?}", error)
             }
-            other => Err(format!("DialogBoxParamW returned unexpected value: {}", other).into()),
+            other => anyhow::bail!("DialogBoxParamW returned unexpected value: {}", other),
         }
     }
 }
@@ -89,13 +89,10 @@ pub struct SettingsDialog {
     pub dialog_hwnd_arc: Rc<RefCell<Option<HWND>>>,
 }
 
-unsafe fn refresh_device_list(
-    hwnd: HWND,
-    settings: &mut SettingsDialog,
-) -> Result<(), Box<dyn Error>> {
+unsafe fn refresh_device_list(hwnd: HWND, settings: &mut SettingsDialog) -> Result<()> {
     unsafe {
-        let list_hwnd = GetDlgItem(Some(hwnd), IDC_DEVICE_LIST)
-            .map_err(|e| format!("Failed to get device list control: {}", e))?;
+        let list_hwnd =
+            GetDlgItem(Some(hwnd), IDC_DEVICE_LIST).context("Failed to get device list control")?;
 
         // Save current checkbox states by device ID before refresh
         let count = SendMessageW(
@@ -182,7 +179,7 @@ unsafe fn refresh_device_list(
 }
 
 /// Handler for WM_INITDIALOG message
-unsafe fn handle_init_dialog(hwnd: HWND, lparam: LPARAM) -> Result<(), Box<dyn Error>> {
+unsafe fn handle_init_dialog(hwnd: HWND, lparam: LPARAM) -> Result<()> {
     unsafe {
         let settings = lparam.0 as *mut SettingsDialog;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, settings as isize);
@@ -236,8 +233,8 @@ unsafe fn handle_init_dialog(hwnd: HWND, lparam: LPARAM) -> Result<(), Box<dyn E
         );
 
         // Initialize device list
-        let list_hwnd = GetDlgItem(Some(hwnd), IDC_DEVICE_LIST)
-            .map_err(|e| format!("Failed to get device list control: {}", e))?;
+        let list_hwnd =
+            GetDlgItem(Some(hwnd), IDC_DEVICE_LIST).context("Failed to get device list control")?;
 
         // Enable checkboxes
         SendMessageW(
@@ -333,12 +330,12 @@ unsafe fn handle_init_dialog(hwnd: HWND, lparam: LPARAM) -> Result<(), Box<dyn E
 }
 
 /// Handler for WM_DEVICE_CHANGE message
-unsafe fn handle_device_change(hwnd: HWND) -> Result<(), Box<dyn Error>> {
+unsafe fn handle_device_change(hwnd: HWND) -> Result<()> {
     unsafe {
         debug!("Device change detected, refreshing device list");
         let settings = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut SettingsDialog;
         if settings.is_null() {
-            return Err("Settings pointer is null".into());
+            anyhow::bail!("Settings pointer is null");
         }
         let settings_ref = &mut *settings;
         refresh_device_list(hwnd, settings_ref)?;
@@ -347,11 +344,11 @@ unsafe fn handle_device_change(hwnd: HWND) -> Result<(), Box<dyn Error>> {
 }
 
 /// Handler for WM_COMMAND with IDOK
-unsafe fn handle_ok_command(hwnd: HWND) -> Result<(), Box<dyn Error>> {
+unsafe fn handle_ok_command(hwnd: HWND) -> Result<()> {
     unsafe {
         let settings = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut SettingsDialog;
         if settings.is_null() {
-            return Err("Settings pointer is null".into());
+            anyhow::bail!("Settings pointer is null");
         }
         let settings_ref = &mut *settings;
 
@@ -361,8 +358,8 @@ unsafe fn handle_ok_command(hwnd: HWND) -> Result<(), Box<dyn Error>> {
         settings_ref.hotkey_mods = ((hotkey.0 >> 8) & 0xFF) as u8;
 
         // Get device selections
-        let list_hwnd = GetDlgItem(Some(hwnd), IDC_DEVICE_LIST)
-            .map_err(|e| format!("Failed to get device list control: {}", e))?;
+        let list_hwnd =
+            GetDlgItem(Some(hwnd), IDC_DEVICE_LIST).context("Failed to get device list control")?;
         let count = SendMessageW(
             list_hwnd,
             LVM_GETITEMCOUNT,
@@ -388,7 +385,7 @@ unsafe fn handle_ok_command(hwnd: HWND) -> Result<(), Box<dyn Error>> {
 }
 
 /// Handler for WM_COMMAND with IDCANCEL
-unsafe fn handle_cancel_command(hwnd: HWND) -> Result<(), Box<dyn Error>> {
+unsafe fn handle_cancel_command(hwnd: HWND) -> Result<()> {
     unsafe {
         EndDialog(hwnd, DIALOG_RESULT_CANCEL)?;
         Ok(())
@@ -452,7 +449,7 @@ pub fn show_settings_dialog(
     hotkey_mods: &mut u8,
     _notification_client: &IMMNotificationClient,
     dialog_hwnd_arc: &Rc<RefCell<Option<HWND>>>,
-) -> Result<DialogResult, Box<dyn Error>> {
+) -> Result<DialogResult> {
     unsafe {
         // Initialize common controls
         let icc = INITCOMMONCONTROLSEX {

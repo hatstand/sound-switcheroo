@@ -1,7 +1,7 @@
+use anyhow::Result;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use windows::Win32::Media::Audio::EndpointFormFactor;
@@ -51,7 +51,7 @@ fn default_hotkey_config() -> HotkeyConfig {
 }
 
 /// Gets the path to the user's roaming AppData directory
-fn get_roaming_appdata_path() -> Result<PathBuf, Box<dyn Error>> {
+fn get_roaming_appdata_path() -> Result<PathBuf> {
     unsafe {
         let path_ptr =
             SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KNOWN_FOLDER_FLAG::default(), None)?;
@@ -67,7 +67,7 @@ fn get_roaming_appdata_path() -> Result<PathBuf, Box<dyn Error>> {
 }
 
 /// Gets the full path to the AudioSwitch configuration file
-pub fn get_config_file_path() -> Result<PathBuf, Box<dyn Error>> {
+pub fn get_config_file_path() -> Result<PathBuf> {
     let mut path = get_roaming_appdata_path()?;
     path.push("PurpleHatstands");
     path.push("SoundSwitcheroo");
@@ -83,11 +83,7 @@ pub fn get_config_file_path() -> Result<PathBuf, Box<dyn Error>> {
 }
 
 /// Saves the selectable state of devices to a JSON file in the roaming AppData directory
-pub fn save_config(
-    devices: &[AudioDevice],
-    hotkey_vk: u8,
-    hotkey_mods: u8,
-) -> Result<(), Box<dyn Error>> {
+pub fn save_config(devices: &[AudioDevice], hotkey_vk: u8, hotkey_mods: u8) -> Result<()> {
     let config_path = get_config_file_path()?;
 
     // Create a map of device_id -> selectable state
@@ -113,7 +109,7 @@ pub fn save_config(
 
 /// Loads the config from the JSON file in the roaming AppData directory
 /// Uses default values for missing fields
-pub fn load_config() -> Result<AppConfig, Box<dyn Error>> {
+pub fn load_config() -> Result<AppConfig> {
     let config_path = get_config_file_path()?;
 
     if !config_path.exists() {

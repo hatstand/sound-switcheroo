@@ -1,6 +1,5 @@
+use anyhow::{Result, bail};
 use log::debug;
-use simple_error::bail;
-use std::error::Error;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::{
     DEVICE_STATE_ACTIVE, ERole, EndpointFormFactor, IMMDeviceEnumerator, MMDeviceEnumerator,
@@ -17,7 +16,7 @@ use crate::policy_config::IPolicyConfig;
 use crate::safe_strings::with_wide_str;
 
 /// Sets the default audio endpoint for the specified role using raw COM interface calls
-pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Error>> {
+pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<()> {
     unsafe {
         debug!("Attempting to set default endpoint for device: {device_id}, role: {role:?}",);
         let policy_config: IPolicyConfig =
@@ -32,7 +31,7 @@ pub fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn 
 }
 
 /// Gets the friendly name for a device given its ID
-pub fn get_device_friendly_name(device_id: &str) -> Result<String, Box<dyn Error>> {
+pub fn get_device_friendly_name(device_id: &str) -> Result<String> {
     unsafe {
         let device_enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
@@ -46,7 +45,7 @@ pub fn get_device_friendly_name(device_id: &str) -> Result<String, Box<dyn Error
 }
 
 /// Gets the current default audio endpoint for debugging
-pub fn get_current_default_endpoint(role: ERole) -> Result<String, Box<dyn Error>> {
+pub fn get_current_default_endpoint(role: ERole) -> Result<String> {
     unsafe {
         CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
         let device_enumerator: IMMDeviceEnumerator =
@@ -62,7 +61,7 @@ pub fn get_current_default_endpoint(role: ERole) -> Result<String, Box<dyn Error
 }
 
 /// Converts a PROPVARIANT to a String
-unsafe fn propvariant_to_string(propvar: &PROPVARIANT) -> Result<String, Box<dyn Error>> {
+unsafe fn propvariant_to_string(propvar: &PROPVARIANT) -> Result<String> {
     unsafe {
         match propvar.vt() {
             VT_LPWSTR => Ok(String::from_utf16_lossy(
@@ -76,7 +75,7 @@ unsafe fn propvariant_to_string(propvar: &PROPVARIANT) -> Result<String, Box<dyn
 }
 
 /// Enumerates all available audio devices
-pub fn get_available_audio_devices() -> Result<Vec<AudioDevice>, Box<dyn Error>> {
+pub fn get_available_audio_devices() -> Result<Vec<AudioDevice>> {
     let mut devices = Vec::new();
     unsafe {
         let device_enumerator: IMMDeviceEnumerator =
