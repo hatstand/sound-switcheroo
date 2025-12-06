@@ -4,11 +4,13 @@ use defer::defer;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use simple_error::bail;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use std::ptr::null_mut;
+use std::rc::Rc;
 use windows::Win32;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -32,8 +34,9 @@ use windows::Win32::UI::Controls::{
     InitCommonControlsEx, HKM_GETHOTKEY, HKM_SETHOTKEY, HOTKEYF_ALT, HOTKEYF_CONTROL,
     HOTKEYF_SHIFT, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX,
     LIST_VIEW_ITEM_STATE_FLAGS, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_PARAM, LVIF_TEXT,
-    LVIS_STATEIMAGEMASK, LVITEMW, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW,
-    LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMSTATE, LVS_EX_CHECKBOXES,
+    LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS, LVM_GETITEMCOUNT, LVM_GETITEMSTATE,
+    LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMSTATE,
+    LVS_EX_CHECKBOXES,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
@@ -68,9 +71,12 @@ const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9
 const IDD_SETTINGS: u32 = 101;
 const IDC_HOTKEY: i32 = 1001;
 const IDC_DEVICE_LIST: i32 = 1002;
+const WM_DEVICE_CHANGE: u32 = WM_APP + 0x100;
 
 #[windows::core::implement(IMMNotificationClient)]
-pub struct CustomImmNotificationClient;
+pub struct CustomImmNotificationClient {
+    settings_dialog: Rc<RefCell<Option<HWND>>>,
+}
 
 #[allow(non_snake_case)]
 impl IMMNotificationClient_Impl for CustomImmNotificationClient_Impl {
@@ -79,17 +85,43 @@ impl IMMNotificationClient_Impl for CustomImmNotificationClient_Impl {
         pwstrdeviceid: &windows_core::PCWSTR,
         dwnewstate: windows::Win32::Media::Audio::DEVICE_STATE,
     ) -> windows_core::Result<()> {
-        debug!("Device state changed: id={pwstrdeviceid:?}, new_state={dwnewstate:?}");
+        let device_id = unsafe { pwstrdeviceid.to_string().unwrap_or_default() };
+        let friendly_name =
+            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
+        debug!(
+            "Device state changed: name='{friendly_name}', id={device_id}, new_state={dwnewstate:?}"
+        );
+        if let Some(hwnd) = *self.settings_dialog.borrow() {
+            unsafe {
+                let _ = PostMessageW(Some(hwnd), WM_DEVICE_CHANGE, WPARAM(0), LPARAM(0));
+            }
+        }
         Ok(())
     }
 
     fn OnDeviceAdded(&self, pwstrdeviceid: &windows_core::PCWSTR) -> windows_core::Result<()> {
-        debug!("Device added: id={pwstrdeviceid:?}");
+        let device_id = unsafe { pwstrdeviceid.to_string().unwrap_or_default() };
+        let friendly_name =
+            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
+        debug!("Device added: name='{friendly_name}', id={device_id}");
+        if let Some(hwnd) = *self.settings_dialog.borrow() {
+            unsafe {
+                let _ = PostMessageW(Some(hwnd), WM_DEVICE_CHANGE, WPARAM(0), LPARAM(0));
+            }
+        }
         Ok(())
     }
 
     fn OnDeviceRemoved(&self, pwstrdeviceid: &windows_core::PCWSTR) -> windows_core::Result<()> {
-        debug!("Device removed: id={pwstrdeviceid:?}");
+        let device_id = unsafe { pwstrdeviceid.to_string().unwrap_or_default() };
+        let friendly_name =
+            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
+        debug!("Device removed: name='{friendly_name}', id={device_id}");
+        if let Some(hwnd) = *self.settings_dialog.borrow() {
+            unsafe {
+                let _ = PostMessageW(Some(hwnd), WM_DEVICE_CHANGE, WPARAM(0), LPARAM(0));
+            }
+        }
         Ok(())
     }
 
@@ -99,7 +131,12 @@ impl IMMNotificationClient_Impl for CustomImmNotificationClient_Impl {
         role: ERole,
         pwstrdefaultdeviceid: &windows_core::PCWSTR,
     ) -> windows_core::Result<()> {
-        debug!("Default device changed: flow={flow:?}, role={role:?}, id={pwstrdefaultdeviceid:?}");
+        let device_id = unsafe { pwstrdefaultdeviceid.to_string().unwrap_or_default() };
+        let friendly_name =
+            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
+        debug!(
+            "Default device changed: name='{friendly_name}', flow={flow:?}, role={role:?}, id={device_id}"
+        );
         Ok(())
     }
 
@@ -108,7 +145,10 @@ impl IMMNotificationClient_Impl for CustomImmNotificationClient_Impl {
         pwstrdeviceid: &windows_core::PCWSTR,
         key: &Win32::Foundation::PROPERTYKEY,
     ) -> windows_core::Result<()> {
-        debug!("Property value changed: id={pwstrdeviceid:?}, key={key:?}");
+        let device_id = unsafe { pwstrdeviceid.to_string().unwrap_or_default() };
+        let friendly_name =
+            get_device_friendly_name(&device_id).unwrap_or_else(|_| "Unknown".to_string());
+        debug!("Property value changed: name='{friendly_name}', id={device_id}, key={key:?}");
         Ok(())
     }
 }
@@ -125,6 +165,20 @@ fn set_default_endpoint(device_id: &str, role: ERole) -> Result<(), Box<dyn Erro
             policy_config.SetDefaultEndpoint(wide_device_id, role)
         })?;
         Ok(())
+    }
+}
+
+/// Gets the friendly name for a device given its ID
+fn get_device_friendly_name(device_id: &str) -> Result<String, Box<dyn Error>> {
+    unsafe {
+        let device_enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+
+        let device = with_wide_str(device_id, |wide_id| device_enumerator.GetDevice(wide_id))?;
+
+        let props = device.OpenPropertyStore(STGM_READ)?;
+        let friendly_name = props.GetValue(&PKEY_Device_FriendlyName)?;
+        propvariant_to_string(&friendly_name)
     }
 }
 
@@ -235,6 +289,9 @@ struct AudioSwitch {
 
     hotkey_vk: u8,
     hotkey_mods: u8,
+
+    notification_client: IMMNotificationClient,
+    settings_dialog_hwnd: Rc<RefCell<Option<HWND>>>,
 }
 
 impl Drop for AudioSwitch {
@@ -321,6 +378,8 @@ impl AudioSwitch {
                         &mut self.available_devices,
                         &mut self.hotkey_vk,
                         &mut self.hotkey_mods,
+                        &self.notification_client,
+                        &self.settings_dialog_hwnd,
                     );
 
                     // Always re-register the hotkey after closing the dialog
@@ -717,6 +776,90 @@ struct SettingsDialog {
     devices: Vec<AudioDevice>,
     hotkey_vk: u8,
     hotkey_mods: u8,
+    dialog_hwnd_arc: Rc<RefCell<Option<HWND>>>,
+}
+
+unsafe fn refresh_device_list(hwnd: HWND, settings: &mut SettingsDialog) {
+    unsafe {
+        let list_hwnd = GetDlgItem(Some(hwnd), IDC_DEVICE_LIST).unwrap();
+
+        // Save current checkbox states by device ID before refresh
+        let count = SendMessageW(
+            list_hwnd,
+            LVM_GETITEMCOUNT,
+            Some(WPARAM(0)),
+            Some(LPARAM(0)),
+        )
+        .0;
+
+        let mut device_states: HashMap<String, bool> = HashMap::new();
+        for i in 0..count {
+            if (i as usize) < settings.devices.len() {
+                let state = SendMessageW(
+                    list_hwnd,
+                    LVM_GETITEMSTATE,
+                    Some(WPARAM(i as usize)),
+                    Some(LPARAM(LVIS_STATEIMAGEMASK.0 as isize)),
+                )
+                .0;
+                let device = &settings.devices[i as usize];
+                device_states.insert(device.id.clone(), (state & 0x2000) != 0);
+            }
+        }
+
+        // Fetch current devices and apply saved checkbox states
+        // During refresh, only show currently available devices (don't preserve unplugged ones)
+        if let Ok(mut current_devices) = get_available_audio_devices() {
+            // Apply saved checkbox states to current devices
+            for device in current_devices.iter_mut() {
+                if let Some(&selectable) = device_states.get(&device.id) {
+                    device.selectable = selectable;
+                }
+            }
+            settings.devices = current_devices;
+        }
+
+        // Clear the list
+        SendMessageW(
+            list_hwnd,
+            LVM_DELETEALLITEMS,
+            Some(WPARAM(0)),
+            Some(LPARAM(0)),
+        );
+
+        // Re-populate with updated devices
+        for (idx, device) in settings.devices.iter().enumerate() {
+            safe_strings::with_wide_str_mut(&device.friendly_name, |device_name| {
+                let lvi = LVITEMW {
+                    mask: LVIF_TEXT | LVIF_PARAM,
+                    iItem: idx as i32,
+                    pszText: windows_core::PWSTR(device_name.0),
+                    lParam: LPARAM(idx as isize),
+                    ..Default::default()
+                };
+                SendMessageW(
+                    list_hwnd,
+                    LVM_INSERTITEMW,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(&lvi as *const _ as isize)),
+                );
+
+                // Set checkbox state
+                let state = if device.selectable { 0x2000 } else { 0x1000 };
+                let state_lvi = LVITEMW {
+                    stateMask: LVIS_STATEIMAGEMASK,
+                    state: LIST_VIEW_ITEM_STATE_FLAGS(state),
+                    ..Default::default()
+                };
+                SendMessageW(
+                    list_hwnd,
+                    LVM_SETITEMSTATE,
+                    Some(WPARAM(idx)),
+                    Some(LPARAM(&state_lvi as *const _ as isize)),
+                );
+            });
+        }
+    }
 }
 
 unsafe extern "system" fn settings_dialog_proc(
@@ -732,6 +875,9 @@ unsafe extern "system" fn settings_dialog_proc(
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, settings as isize);
 
                 let settings_ref = &mut *settings;
+
+                // Store dialog handle in Rc for notifications
+                *settings_ref.dialog_hwnd_arc.borrow_mut() = Some(hwnd);
 
                 // Enable dark mode and set icon based on system theme
                 let dark_mode = is_dark_mode().unwrap_or(false);
@@ -867,6 +1013,24 @@ unsafe extern "system" fn settings_dialog_proc(
                     }
                 }
 
+                // Store dialog handle for notifications - we'll retrieve it from SettingsDialog
+                1
+            }
+            WM_DESTROY => {
+                // Clear dialog handle when closing
+                let settings = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut SettingsDialog;
+                if !settings.is_null() {
+                    // Dialog is closing, no need to track it anymore
+                }
+                0
+            }
+            WM_DEVICE_CHANGE => {
+                debug!("Device change detected, refreshing device list");
+                let settings = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut SettingsDialog;
+                if !settings.is_null() {
+                    let settings_ref = &mut *settings;
+                    refresh_device_list(hwnd, settings_ref);
+                }
                 1
             }
             WM_COMMAND => {
@@ -931,6 +1095,8 @@ fn show_settings_dialog(
     devices: &mut Vec<AudioDevice>,
     hotkey_vk: &mut u8,
     hotkey_mods: &mut u8,
+    _notification_client: &IMMNotificationClient,
+    dialog_hwnd_arc: &Rc<RefCell<Option<HWND>>>,
 ) -> Result<bool, Box<dyn Error>> {
     unsafe {
         // Initialize common controls
@@ -950,9 +1116,12 @@ fn show_settings_dialog(
             devices: current_devices,
             hotkey_vk: *hotkey_vk,
             hotkey_mods: *hotkey_mods,
+            dialog_hwnd_arc: dialog_hwnd_arc.clone(),
         };
 
         let module = GetModuleHandleW(None)?;
+
+        // Dialog proc will store handle in Arc
         let result = DialogBoxParamW(
             Some(module.into()),
             PCWSTR(IDD_SETTINGS as *const u16),
@@ -960,6 +1129,9 @@ fn show_settings_dialog(
             Some(settings_dialog_proc),
             LPARAM(&mut settings as *mut _ as isize),
         );
+
+        // Clear dialog handle after dialog closes
+        *dialog_hwnd_arc.borrow_mut() = None;
 
         if result == 1 {
             *devices = settings.devices;
@@ -1026,6 +1198,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             .find(|d| d.id == current_device_id)
             .ok_or_else(|| simple_error::SimpleError::new("Current device not found"))?;
         let tooltip = current_device.friendly_name.clone();
+
+        debug!("Registering for device notifications");
+        let settings_dialog_hwnd_arc = Rc::new(RefCell::new(None));
+        let notification_client: IMMNotificationClient = CustomImmNotificationClient {
+            settings_dialog: settings_dialog_hwnd_arc.clone(),
+        }
+        .into();
+        let device_enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        IMMDeviceEnumerator::RegisterEndpointNotificationCallback(
+            &device_enumerator,
+            &notification_client,
+        )?;
+
         let me = AudioSwitch {
             window,
             icon: AdaptiveIcon::new("audio_icon", "audio_icon")?,
@@ -1036,6 +1222,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             speaker_icon: AdaptiveIcon::new("speaker_icon", "speaker_icon_dark")?,
             hotkey_vk: config.hotkey.vk,
             hotkey_mods: config.hotkey.mods,
+            notification_client: notification_client.clone(),
+            settings_dialog_hwnd: settings_dialog_hwnd_arc.clone(),
         };
         // Store the AudioSwitch instance in the window's user data.
         SetWindowLongPtrW(window, GWLP_USERDATA, &me as *const _ as isize);
@@ -1070,12 +1258,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         });
         // Enable better callback API.
         Shell_NotifyIconW(NIM_SETVERSION, notify_icon_data).ok()?;
-
-        debug!("Registering for device notifications");
-        let not: IMMNotificationClient = CustomImmNotificationClient {}.into();
-        let device_enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        IMMDeviceEnumerator::RegisterEndpointNotificationCallback(&device_enumerator, &not)?;
 
         debug!("Registering global hotkey");
         RegisterHotKey(None, HOTKEY_ID, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 0x58)?;
