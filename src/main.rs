@@ -401,7 +401,7 @@ fn main() -> Result<()> {
 
         let me = AudioSwitch {
             window,
-            icon: AdaptiveIcon::new("audio_icon", "audio_icon")?,
+            icon: AdaptiveIcon::new("switcheroo_icon", "switcheroo_dark_icon")?,
             popup_menu: create_popup_menu()?,
             available_devices: devices,
             headphones_icon: AdaptiveIcon::new("headphones_icon", "headphones_icon_dark")?,

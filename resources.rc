@@ -6,15 +6,16 @@
 #define IDC_DEVICE_LIST 1002
 #define IDC_STATIC -1
 
-audio_icon ICON "audio.ico"
+MAINICON ICON "switcheroo_dark.ico"
+
+switcheroo_dark_icon ICON "switcheroo_dark.ico"
+switcheroo_icon ICON "switcheroo.ico"
 headphones_icon ICON "headphones.ico"
 headphones_icon_dark ICON "headphones_dark.ico"
 headset_icon ICON "headset.ico"
 headset_icon_dark ICON "headset_dark.ico"
 speaker_icon ICON "speaker.ico"
 speaker_icon_dark ICON "speaker_dark.ico"
-switcheroo_dark_icon ICON "switcheroo_dark.ico"
-switcheroo_icon ICON "switcheroo.ico"
 
 IDD_SETTINGS DIALOGEX 0, 0, 300, 250
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
