@@ -15,10 +15,7 @@ use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Controls::{HOTKEYF_ALT, HOTKEYF_CONTROL, HOTKEYF_SHIFT};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    MOD_ALT, MOD_CONTROL, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
 use windows::Win32::UI::Shell::{
     NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
     NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONDATAW_0,
@@ -58,11 +55,35 @@ const IDD_SETTINGS: u32 = 101;
 const IDC_HOTKEY: i32 = 1001;
 const IDC_DEVICE_LIST: i32 = 1002;
 pub(crate) const WM_DEVICE_CHANGE: u32 = WM_APP + 0x100;
+const WM_REREGISTER_HOTKEY: u32 = WM_APP + 0x101;
 
 // ListView checkbox state constants (state image mask values)
 // These represent INDEXTOSTATEIMAGEMASK(1) and INDEXTOSTATEIMAGEMASK(2)
 const LVIS_UNCHECKED: isize = 0x1000; // Checkbox unchecked
 const LVIS_CHECKED: isize = 0x2000; // Checkbox checked
+
+/// Converts hotkey modifiers from HOTKEYF_ format (used by hotkey control)
+/// to MOD_ format (used by RegisterHotKey)
+fn hotkeyf_to_mod(
+    hotkeyf_mods: u8,
+) -> windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS {
+    use windows::Win32::UI::Controls::{HOTKEYF_ALT, HOTKEYF_CONTROL, HOTKEYF_SHIFT};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
+    };
+
+    let mut mods = HOT_KEY_MODIFIERS(0);
+    if hotkeyf_mods & HOTKEYF_SHIFT as u8 != 0 {
+        mods |= MOD_SHIFT;
+    }
+    if hotkeyf_mods & HOTKEYF_CONTROL as u8 != 0 {
+        mods |= MOD_CONTROL;
+    }
+    if hotkeyf_mods & HOTKEYF_ALT as u8 != 0 {
+        mods |= MOD_ALT;
+    }
+    mods
+}
 
 fn string_to_tip(s: &str) -> [u16; 128] {
     let mut ret = [0u16; 128];
@@ -181,24 +202,6 @@ impl AudioSwitch {
                         &self.settings_dialog_hwnd,
                     );
 
-                    // Always re-register the hotkey after closing the dialog
-                    // Hotkey control uses: HOTKEYF_SHIFT, HOTKEYF_CONTROL, HOTKEYF_ALT
-                    let mut mods =
-                        windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS(0);
-                    if self.hotkey_mods & HOTKEYF_SHIFT as u8 != 0 {
-                        mods |= MOD_SHIFT;
-                    }
-                    if self.hotkey_mods & HOTKEYF_CONTROL as u8 != 0 {
-                        mods |= MOD_CONTROL;
-                    }
-                    if self.hotkey_mods & HOTKEYF_ALT as u8 != 0 {
-                        mods |= MOD_ALT;
-                    }
-
-                    if let Err(e) = RegisterHotKey(None, HOTKEY_ID, mods, self.hotkey_vk as u32) {
-                        error!("Failed to register hotkey: {e}");
-                    }
-
                     // Save settings if dialog was accepted
                     if let Ok(DialogResult::Accepted) = dialog_result
                         && let Err(e) =
@@ -206,6 +209,15 @@ impl AudioSwitch {
                     {
                         error!("Failed to save config: {e}");
                     }
+
+                    // Post a message to re-register the hotkey after the dialog cleanup completes
+                    // This ensures the dialog's window procedure finishes before we re-register
+                    let _ = PostMessageW(
+                        Some(self.window),
+                        WM_REREGISTER_HOTKEY,
+                        WPARAM(0),
+                        LPARAM(0),
+                    );
                 }
                 _ => {
                     debug!("Unknown menu item selected: {id}");
@@ -476,7 +488,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         Shell_NotifyIconW(NIM_SETVERSION, notify_icon_data).ok()?;
 
         debug!("Registering global hotkey");
-        RegisterHotKey(None, HOTKEY_ID, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 0x58)?;
+        let initial_mods = hotkeyf_to_mod(me.hotkey_mods);
+        RegisterHotKey(None, HOTKEY_ID, initial_mods, me.hotkey_vk as u32)?;
 
         // Enter the message loop.
         info!("Running...");
@@ -565,6 +578,16 @@ unsafe extern "system" fn window_callback(
             }
             WM_DESTROY => {
                 PostQuitMessage(0);
+                LRESULT(0)
+            }
+            WM_REREGISTER_HOTKEY => {
+                // Re-register the hotkey after settings dialog closes
+                let me = raw_me.as_mut().unwrap();
+                let mods = hotkeyf_to_mod(me.hotkey_mods);
+
+                if let Err(e) = RegisterHotKey(None, HOTKEY_ID, mods, me.hotkey_vk as u32) {
+                    error!("Failed to register hotkey: {e}");
+                }
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
