@@ -14,48 +14,47 @@ use windows::Win32;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
 };
 use windows::Win32::Media::Audio::{
-    eConsole, ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator,
-    IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
-    PKEY_AudioEndpoint_FormFactor, Speakers,
+    ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator, IMMNotificationClient,
+    IMMNotificationClient_Impl, MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor, Speakers,
+    eConsole,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     STGM_READ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
 use windows::Win32::UI::Controls::{
-    InitCommonControlsEx, HKM_GETHOTKEY, HKM_SETHOTKEY, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES,
-    INITCOMMONCONTROLSEX, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_PARAM,
+    HKM_GETHOTKEY, HKM_SETHOTKEY, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX,
+    InitCommonControlsEx, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_TEXT, LVCF_WIDTH, LVCOLUMNW, LVIF_PARAM,
     LVIF_TEXT, LVIS_STATEIMAGEMASK, LVITEMW, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW,
-    LVM_INSERTITEMW, LVM_SETITEMSTATE,
+    LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMSTATE, LVS_EX_CHECKBOXES,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
+    MOD_ALT, MOD_CONTROL, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
 };
 use windows::Win32::UI::Shell::{
-    FOLDERID_RoamingAppData, SHGetKnownFolderPath, ShellExecuteW, Shell_NotifyIconW,
-    KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
-    NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFYICONDATAW, NOTIFYICONDATAW_0,
-    NOTIFYICON_VERSION_4,
+    FOLDERID_RoamingAppData, KNOWN_FOLDER_FLAG, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP,
+    NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4,
+    NOTIFYICONDATAW, NOTIFYICONDATAW_0, SHGetKnownFolderPath, Shell_NotifyIconW, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DialogBoxParamW,
-    DispatchMessageW, EndDialog, GetCursorPos, GetDlgItem, GetMenuItemInfoW, GetMessageW,
-    GetWindowLongPtrW, GetWindowRect, InsertMenuItemW, LoadIconW, PostMessageW, PostQuitMessage,
-    RegisterClassExW, SendDlgItemMessageW, SendMessageW, SetForegroundWindow, SetMenuItemInfoW,
-    SetWindowLongPtrW, SetWindowPos, TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON,
-    HMENU, MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE,
-    MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, SWP_NOSIZE, SWP_NOZORDER, SW_SHOWNORMAL,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    DispatchMessageW, EndDialog, GWLP_USERDATA, GetCursorPos, GetDlgItem, GetMenuItemInfoW,
+    GetMessageW, GetWindowLongPtrW, GetWindowRect, HICON, HMENU, InsertMenuItemW, LoadIconW,
+    MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID,
+    MIIM_STATE, MIIM_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassExW, SW_SHOWNORMAL,
+    SWP_NOSIZE, SWP_NOZORDER, SendDlgItemMessageW, SendMessageW, SetForegroundWindow,
+    SetMenuItemInfoW, SetWindowLongPtrW, SetWindowPos, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
+    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
     WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_INITDIALOG, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
-use windows_strings::{w, PCWSTR};
+use windows_strings::{PCWSTR, w};
 
 mod policy_config;
 mod safe_strings;
@@ -820,6 +819,14 @@ unsafe extern "system" fn settings_dialog_proc(
 
                 // Initialize device list
                 let list_hwnd = GetDlgItem(Some(hwnd), IDC_DEVICE_LIST).unwrap();
+
+                // Enable checkboxes
+                SendMessageW(
+                    list_hwnd,
+                    LVM_SETEXTENDEDLISTVIEWSTYLE,
+                    Some(WPARAM(LVS_EX_CHECKBOXES as usize)),
+                    Some(LPARAM(LVS_EX_CHECKBOXES as isize)),
+                );
 
                 // Add columns
                 safe_strings::with_wide_str_mut("Device Name", |col_text| {
