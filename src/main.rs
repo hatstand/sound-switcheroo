@@ -53,16 +53,8 @@ use settings_dialog::{DialogResult, show_settings_dialog};
 use utils::{hotkeyf_to_mod, string_to_tip};
 
 const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
-const IDD_SETTINGS: u32 = 101;
-const IDC_HOTKEY: i32 = 1001;
-const IDC_DEVICE_LIST: i32 = 1002;
 pub(crate) const WM_DEVICE_CHANGE: u32 = WM_APP + 0x100;
 const WM_REREGISTER_HOTKEY: u32 = WM_APP + 0x101;
-
-// ListView checkbox state constants (state image mask values)
-// These represent INDEXTOSTATEIMAGEMASK(1) and INDEXTOSTATEIMAGEMASK(2)
-const LVIS_UNCHECKED: isize = 0x1000; // Checkbox unchecked
-const LVIS_CHECKED: isize = 0x2000; // Checkbox checked
 
 #[derive(Debug)]
 struct AudioSwitch {

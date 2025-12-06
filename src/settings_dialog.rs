@@ -26,13 +26,21 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_core::PCWSTR;
 
 use crate::LOWORD;
+use crate::WM_DEVICE_CHANGE;
 use crate::audio_device::get_available_audio_devices;
 use crate::config::{AudioDevice, merge_device_states};
 use crate::icon::{AdaptiveIcon, is_dark_mode};
 use crate::safe_strings;
-use crate::{
-    IDC_DEVICE_LIST, IDC_HOTKEY, IDD_SETTINGS, LVIS_CHECKED, LVIS_UNCHECKED, WM_DEVICE_CHANGE,
-};
+
+// Dialog resource IDs
+const IDD_SETTINGS: u32 = 101;
+const IDC_HOTKEY: i32 = 1001;
+const IDC_DEVICE_LIST: i32 = 1002;
+
+// ListView checkbox state constants (state image mask values)
+// These represent INDEXTOSTATEIMAGEMASK(1) and INDEXTOSTATEIMAGEMASK(2)
+const LVIS_UNCHECKED: isize = 0x1000; // Checkbox unchecked
+const LVIS_CHECKED: isize = 0x2000; // Checkbox checked
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogResult {
