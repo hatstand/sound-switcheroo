@@ -12,7 +12,10 @@ use std::path::PathBuf;
 use std::ptr::null_mut;
 use windows::Win32;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows::Win32::Media::Audio::{
     eConsole, ERole, EndpointFormFactor, Headphones, Headset, IMMDeviceEnumerator,
     IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
@@ -43,13 +46,13 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DialogBoxParamW,
     DispatchMessageW, EndDialog, GetCursorPos, GetDlgItem, GetMenuItemInfoW, GetMessageW,
-    GetWindowLongPtrW, InsertMenuItemW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
-    SendDlgItemMessageW, SendMessageW, SetForegroundWindow, SetMenuItemInfoW, SetWindowLongPtrW,
-    TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON, HMENU, MENUITEMINFOW, MFS_CHECKED,
-    MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MSG,
-    SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_INITDIALOG, WM_QUIT, WM_RBUTTONUP,
-    WNDCLASSEXW,
+    GetWindowLongPtrW, GetWindowRect, InsertMenuItemW, LoadIconW, PostMessageW, PostQuitMessage,
+    RegisterClassExW, SendDlgItemMessageW, SendMessageW, SetForegroundWindow, SetMenuItemInfoW,
+    SetWindowLongPtrW, SetWindowPos, TrackPopupMenuEx, UnregisterClassW, GWLP_USERDATA, HICON,
+    HMENU, MENUITEMINFOW, MFS_CHECKED, MFS_DISABLED, MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE,
+    MIIM_ID, MIIM_STATE, MIIM_STRING, MSG, SWP_NOSIZE, SWP_NOZORDER, SW_SHOWNORMAL,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_INITDIALOG, WM_QUIT, WM_RBUTTONUP, WNDCLASSEXW,
 };
 use windows_core::{BOOL, GUID};
 use windows_strings::{w, PCWSTR};
@@ -865,6 +868,34 @@ unsafe extern "system" fn settings_dialog_proc(
                             Some(LPARAM(&state_lvi as *const _ as isize)),
                         );
                     });
+                }
+
+                // Center the dialog on the current monitor
+                let mut dialog_rect = RECT::default();
+                if GetWindowRect(hwnd, &mut dialog_rect).is_ok() {
+                    let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                    let mut monitor_info = MONITORINFO {
+                        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                        ..Default::default()
+                    };
+                    if GetMonitorInfoW(monitor, &mut monitor_info).as_bool() {
+                        let work_area = monitor_info.rcWork;
+                        let dialog_width = dialog_rect.right - dialog_rect.left;
+                        let dialog_height = dialog_rect.bottom - dialog_rect.top;
+                        let center_x =
+                            work_area.left + (work_area.right - work_area.left - dialog_width) / 2;
+                        let center_y =
+                            work_area.top + (work_area.bottom - work_area.top - dialog_height) / 2;
+                        let _ = SetWindowPos(
+                            hwnd,
+                            None,
+                            center_x,
+                            center_y,
+                            0,
+                            0,
+                            SWP_NOSIZE | SWP_NOZORDER,
+                        );
+                    }
                 }
 
                 1
