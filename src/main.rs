@@ -659,6 +659,40 @@ fn apply_device_selectable_state(
     }
 }
 
+/// Merges runtime device list with saved device states
+/// Current devices get their selectable state from saved_devices
+/// Previously saved devices that are no longer plugged in are preserved in the list
+fn merge_device_states(current_devices: &mut Vec<AudioDevice>, saved_devices: &[AudioDevice]) {
+    // Build a map of saved device states
+    let saved_map: HashMap<String, bool> = saved_devices
+        .iter()
+        .map(|d| (d.id.clone(), d.selectable))
+        .collect();
+
+    // Apply saved states to current devices
+    for device in current_devices.iter_mut() {
+        if let Some(&selectable) = saved_map.get(&device.id) {
+            device.selectable = selectable;
+            debug!(
+                "Restored selectable state for device {}: {}",
+                device.friendly_name, selectable
+            );
+        }
+    }
+
+    // Add previously saved devices that are no longer available (unplugged)
+    // These devices will appear in settings but can't be selected as current device
+    for saved_device in saved_devices.iter() {
+        if !current_devices.iter().any(|d| d.id == saved_device.id) {
+            debug!(
+                "Preserving unplugged device in settings: {}",
+                saved_device.friendly_name
+            );
+            current_devices.push(saved_device.clone());
+        }
+    }
+}
+
 fn is_dark_mode() -> Result<bool, Box<dyn Error>> {
     let theme_key = windows_registry::CURRENT_USER
         .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")?;
@@ -906,8 +940,14 @@ fn show_settings_dialog(
         };
         InitCommonControlsEx(&icc).ok()?;
 
+        // Fetch currently available devices from the system
+        let mut current_devices = get_available_audio_devices()?;
+
+        // Merge current devices with saved state from devices parameter
+        merge_device_states(&mut current_devices, devices);
+
         let mut settings = SettingsDialog {
-            devices: devices.clone(),
+            devices: current_devices,
             hotkey_vk: *hotkey_vk,
             hotkey_mods: *hotkey_mods,
         };
