@@ -51,7 +51,7 @@ use audio_device::{
 use config::{AudioDevice, apply_device_selectable_state, load_config, save_config};
 use icon::{AdaptiveIcon, is_dark_mode};
 use notification_client::CustomImmNotificationClient;
-use settings_dialog::show_settings_dialog;
+use settings_dialog::{DialogResult, show_settings_dialog};
 
 const NOTIFY_ICON_GUID: GUID = GUID::from_u128(0x8fc84650_4bca_4125_b778_10313f9623df);
 const IDD_SETTINGS: u32 = 101;
@@ -200,7 +200,7 @@ impl AudioSwitch {
                     }
 
                     // Save settings if dialog was accepted
-                    if let Ok(true) = dialog_result
+                    if let Ok(DialogResult::Accepted) = dialog_result
                         && let Err(e) =
                             save_config(&self.available_devices, self.hotkey_vk, self.hotkey_mods)
                     {

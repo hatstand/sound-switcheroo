@@ -32,6 +32,14 @@ use crate::{
     IDC_DEVICE_LIST, IDC_HOTKEY, IDD_SETTINGS, LVIS_CHECKED, LVIS_UNCHECKED, WM_DEVICE_CHANGE,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogResult {
+    /// User clicked OK/Save button - changes should be saved
+    Accepted,
+    /// User clicked Cancel or closed the dialog - changes should be discarded
+    Cancelled,
+}
+
 pub struct SettingsDialog {
     pub devices: Vec<AudioDevice>,
     pub hotkey_vk: u8,
@@ -365,7 +373,7 @@ pub fn show_settings_dialog(
     hotkey_mods: &mut u8,
     _notification_client: &IMMNotificationClient,
     dialog_hwnd_arc: &Rc<RefCell<Option<HWND>>>,
-) -> Result<bool, Box<dyn Error>> {
+) -> Result<DialogResult, Box<dyn Error>> {
     unsafe {
         // Initialize common controls
         let icc = INITCOMMONCONTROLSEX {
@@ -405,9 +413,9 @@ pub fn show_settings_dialog(
             *devices = settings.devices;
             *hotkey_vk = settings.hotkey_vk;
             *hotkey_mods = settings.hotkey_mods;
-            Ok(true)
+            Ok(DialogResult::Accepted)
         } else {
-            Ok(false)
+            Ok(DialogResult::Cancelled)
         }
     }
 }
