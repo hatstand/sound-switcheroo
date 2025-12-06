@@ -162,7 +162,7 @@ impl AudioSwitch {
                 POPUP_SETTINGS_ID => {
                     // Unregister hotkey before opening settings dialog
                     // so the hotkey control can use the same key combination
-                    let _ = UnregisterHotKey(None, HOTKEY_ID);
+                    UnregisterHotKey(None, HOTKEY_ID)?;
 
                     let dialog_result = show_settings_dialog(
                         self.window,
@@ -183,12 +183,12 @@ impl AudioSwitch {
 
                     // Post a message to re-register the hotkey after the dialog cleanup completes
                     // This ensures the dialog's window procedure finishes before we re-register
-                    let _ = PostMessageW(
+                    PostMessageW(
                         Some(self.window),
                         WM_REREGISTER_HOTKEY,
                         WPARAM(0),
                         LPARAM(0),
-                    );
+                    )?;
                 }
                 _ => {
                     debug!("Unknown menu item selected: {id}");
